@@ -6,7 +6,7 @@ Willkommen zu meinem ersten GitHub-Projekt!
 
 Dieses Projekt ist ein einfaches Beispiel um den GitHub-Workflow zu lernen.
 
-## Vorausstzungen
+## Voraussetzungen
 
 - Git installiert
 - GitHub-Konto
