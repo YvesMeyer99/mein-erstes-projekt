@@ -1,0 +1,22 @@
+# Secrets / lokale Konfiguration
+.env
+*.env
+
+# Lokale Datenbank
+*.db
+*.sqlite
+*.sqlite3
+
+# Brainstorming-Companion-Artefakte
+.superpowers/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Node / Frontend
+node_modules/
+dist/
+build/
