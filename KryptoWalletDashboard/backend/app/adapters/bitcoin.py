@@ -20,10 +20,8 @@ class BitcoinAdapter(TransactionAdapter):
         self.address = address
 
     def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
-        response = requests.get(f"{self.API_BASE}/address/{self.address}/txs", timeout=10)
-        response.raise_for_status()
         results: list[NormalizedTransaction] = []
-        for tx in response.json():
+        for tx in self._fetch_all_pages():
             block_time = tx.get("status", {}).get("block_time")
             if block_time is None:
                 continue
@@ -32,7 +30,7 @@ class BitcoinAdapter(TransactionAdapter):
                 continue
 
             vin_value = sum(
-                vin["prevout"]["value"]
+                vin.get("prevout", {}).get("value", 0)
                 for vin in tx["vin"]
                 if vin.get("prevout", {}).get("scriptpubkey_address") == self.address
             )
@@ -48,7 +46,7 @@ class BitcoinAdapter(TransactionAdapter):
             fee_amount = None
             fee_asset = None
             if net_sats < 0:
-                total_vin = sum(vin["prevout"]["value"] for vin in tx["vin"])
+                total_vin = sum(vin.get("prevout", {}).get("value", 0) for vin in tx["vin"])
                 total_vout = sum(vout["value"] for vout in tx["vout"])
                 fee_sats = total_vin - total_vout
                 fee_amount = Decimal(fee_sats) / SATS_PER_BTC
@@ -70,3 +68,31 @@ class BitcoinAdapter(TransactionAdapter):
                 )
             )
         return results
+
+    def _fetch_all_pages(self) -> list[dict]:
+        """Walk Blockstream's paginated txs endpoint.
+
+        The base endpoint returns mempool txs plus only the most recent 25
+        confirmed txs. Older confirmed txs must be fetched page-by-page via
+        the /txs/chain/:last_seen_txid endpoint, keyed off the last
+        confirmed txid seen so far, until a page comes back with fewer than
+        25 confirmed txs (or none at all).
+        """
+        response = requests.get(f"{self.API_BASE}/address/{self.address}/txs", timeout=10)
+        response.raise_for_status()
+        page = response.json()
+
+        all_txs: list[dict] = []
+        while True:
+            all_txs.extend(page)
+            confirmed = [t for t in page if t.get("status", {}).get("confirmed")]
+            if len(confirmed) < 25:
+                break
+            last_txid = confirmed[-1]["txid"]
+            response = requests.get(
+                f"{self.API_BASE}/address/{self.address}/txs/chain/{last_txid}", timeout=10
+            )
+            response.raise_for_status()
+            page = response.json()
+
+        return all_txs

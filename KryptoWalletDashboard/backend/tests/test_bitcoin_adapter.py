@@ -120,3 +120,52 @@ def test_since_filters_out_older_transactions():
     results = adapter.fetch_transactions(since)
 
     assert [tx.external_id for tx in results] == ["tx-new"]
+
+
+@responses.activate
+def test_paginates_through_chain_endpoint_until_short_page():
+    # Page 1: exactly 25 confirmed txs (a "full" page) -> must fetch page 2.
+    page1 = [
+        _tx(
+            f"tx-page1-{i}",
+            1700000000 + i,
+            vin=[{"prevout": {"scriptpubkey_address": "someone-else", "value": 200000}}],
+            vout=[{"scriptpubkey_address": ADDRESS, "value": 100000}],
+        )
+        for i in range(25)
+    ]
+    # Page 2: only 1 confirmed tx -> short page, pagination must stop here.
+    page2 = [
+        _tx(
+            "tx-page2-0",
+            1700000100,
+            vin=[{"prevout": {"scriptpubkey_address": "someone-else", "value": 200000}}],
+            vout=[{"scriptpubkey_address": ADDRESS, "value": 100000}],
+        )
+    ]
+
+    responses.add(
+        responses.GET,
+        f"https://blockstream.info/api/address/{ADDRESS}/txs",
+        json=page1,
+        status=200,
+    )
+    last_txid_page1 = page1[-1]["txid"]
+    responses.add(
+        responses.GET,
+        f"https://blockstream.info/api/address/{ADDRESS}/txs/chain/{last_txid_page1}",
+        json=page2,
+        status=200,
+    )
+
+    adapter = BitcoinAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 26
+    assert {tx.external_id for tx in results} == {t["txid"] for t in page1} | {
+        t["txid"] for t in page2
+    }
+    # Only two HTTP calls: the base page, then one chain-endpoint page. No
+    # further pagination request should have been made since page2 was short.
+    assert len(responses.calls) == 2
+    assert responses.calls[1].request.url.endswith(f"/txs/chain/{last_txid_page1}")
