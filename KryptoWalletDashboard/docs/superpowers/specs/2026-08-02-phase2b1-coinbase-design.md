@@ -6,8 +6,10 @@ Datum: 2026-08-02
 
 Erste Börsen-Erweiterung von Plan 2b: ein Adapter für das Coinbase-App-
 (Retail-)Konto, der Käufe, Verkäufe, Ein-/Auszahlungen und Sends/Receives
-über alle Konten (BTC, ETH, EUR, ...) des Nutzers erfasst. Baut auf dem
-bereits abgeschlossenen Phase-1-Backend und Plan 2a (EVM-Chains) auf.
+über alle Krypto-Konten (BTC, ETH, ...) des Nutzers erfasst. Fiat-Konten
+(EUR, CHF, ...) werden bewusst ausgeklammert (siehe "Normalisierung").
+Baut auf dem bereits abgeschlossenen Phase-1-Backend und Plan 2a
+(EVM-Chains) auf.
 
 ## Umfang
 
@@ -16,8 +18,10 @@ Coinbase Advanced Trade oder Coinbase Prime.
 
 **Konten:** automatisch alle Konten des Accounts abgefragt (`GET
 /v2/accounts`), keine manuelle Konten-Konfiguration nötig – jedes
-zurückgelieferte Konto (pro Währung/Asset) wird einzeln nach
-Transaktionen durchsucht.
+zurückgelieferte **Krypto**-Konto (pro Asset) wird einzeln nach
+Transaktionen durchsucht. Fiat-Konten (EUR, CHF, USD, GBP, JPY, CAD,
+AUD) werden übersprungen, ohne dass überhaupt eine Transaktions-Abfrage
+für sie ausgeführt wird (siehe "Normalisierung" für den Grund).
 
 ## API-Recherche (Stand: 2026-08-02, via Coinbase Developer Docs)
 
@@ -96,6 +100,25 @@ Anders als Kraken (HMAC) nutzt Coinbase App API kurzlebige JWTs:
 - Gebühren: Coinbase liefert bei `buy`/`sell` z.T. ein separates
   `fee`-Objekt; falls vorhanden wird es als `fee_amount`/`fee_asset`
   übernommen, sonst bleiben beide `None` (kein Fehler).
+- **Fiat-Konten werden übersprungen** (EUR, CHF, USD, GBP, JPY, CAD,
+  AUD): ein `buy`/`sell` kann auf dem Fiat-Konto selbst eine zweite
+  Transaktion mit umgekehrtem Vorzeichen erzeugen (z.B. bei einem aus
+  EUR-Guthaben finanzierten Kauf). Da unser Portfolio-Modell `buy` immer
+  als Zufluss und `sell` immer als Abfluss behandelt (unabhängig vom
+  Konto), würde eine solche Fiat-Zeile das Vorzeichen verkehrt herum
+  verbuchen. Da Fiat-Bestände für die Krypto-Steuerbetrachtung ohnehin
+  nicht relevant sind, werden Fiat-Konten komplett übersprungen –
+  inklusive der Transaktions-Abfrage selbst (kein unnötiger API-Call).
+- **Inkrementeller Sync mit Lookback-Puffer:** da sich alle Coinbase-
+  Unterkonten einen einzigen Sync-Zeitstempel (`account_label=
+  "coinbase-main"`) teilen, könnte eine Transaktion, die beim letzten
+  Sync noch `pending` war und erst später mit ihrem ursprünglichen
+  (früheren) Zeitstempel `completed` wird, sonst dauerhaft übersehen
+  werden. Der Adapter zieht deshalb intern 7 Tage von `since` ab, bevor
+  er filtert (die öffentliche `fetch_transactions(since)`-Signatur bleibt
+  unverändert) – das führt zu etwas redundantem erneuten Prüfen bereits
+  bekannter Transaktionen (harmlos dank Dedup über `external_id`), schließt
+  aber die Datenverlust-Lücke.
 
 ## Pagination
 

@@ -31,8 +31,11 @@ allen sechs Chains erfasst.
 Zusätzlich zu Bitcoin/EVM-Chains/Kraken wird automatisch dein Coinbase-App-
 Account (Retail, nicht Advanced Trade) mitsynchronisiert, sobald
 `COINBASE_API_KEY_NAME` und `COINBASE_API_PRIVATE_KEY` gesetzt sind. Alle
-Konten (BTC, ETH, EUR, ...) werden automatisch erkannt - keine manuelle
-Konten-Liste nötig.
+Krypto-Konten (BTC, ETH, ...) werden automatisch erkannt - keine manuelle
+Konten-Liste nötig. Fiat-Konten (EUR, CHF, USD, GBP, JPY, CAD, AUD) werden
+bewusst übersprungen (auch keine Transaktions-Abfrage dafür), da sie für
+die Krypto-Steuerbetrachtung nicht relevant sind und ihre Buy/Sell-Zeilen
+sonst mit falschem Vorzeichen im Portfolio landen könnten.
 
 **Wichtig beim Anlegen des API-Keys:**
 - CDP Secret API Key mit **ECDSA-Schlüsseltyp** anlegen (nicht den seit
