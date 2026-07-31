@@ -32,6 +32,28 @@ class FakeAdapter(TransactionAdapter):
         return self._transactions
 
 
+class TzCheckingAdapter(TransactionAdapter):
+    """Mimics the real adapters (bitcoin.py, ethereum.py, kraken.py), which
+    all compare `since` against their own timezone-aware timestamps, e.g.
+    `if since is not None and timestamp <= since`. A naive `since` makes
+    that comparison raise TypeError, exactly like it would for a real
+    adapter."""
+
+    source_type = "chain"
+    source_name = "fake"
+
+    def __init__(self, account_label, transactions=None):
+        super().__init__(account_label)
+        self._transactions = transactions or []
+        self.received_since = "not-called"
+
+    def fetch_transactions(self, since):
+        self.received_since = since
+        if since is not None:
+            datetime(2024, 1, 15, tzinfo=timezone.utc) <= since
+        return self._transactions
+
+
 def _tx(external_id, amount="1", tx_type="transfer_in", asset="FAKE"):
     return NormalizedTransaction(
         timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
@@ -74,7 +96,22 @@ def test_sync_uses_last_synced_at_as_since_on_second_run(db_session):
     sync_all(db_session, [adapter2], FakePriceClient())
 
     state = db_session.query(SyncState).one()
-    assert adapter2.received_since == state.last_synced_at
+    # `received_since` is normalized to timezone-aware before being handed to
+    # adapters, while `state.last_synced_at` comes back naive from SQLite's
+    # DateTime(timezone=True) round trip -- compare on wall-clock value only.
+    assert adapter2.received_since.replace(tzinfo=None) == state.last_synced_at.replace(tzinfo=None)
+
+
+def test_sync_passes_timezone_aware_since_to_adapter_on_second_run(db_session):
+    adapter1 = TzCheckingAdapter("main", transactions=[_tx("t1")])
+    sync_all(db_session, [adapter1], FakePriceClient())
+
+    adapter2 = TzCheckingAdapter("main", transactions=[])
+    reports = sync_all(db_session, [adapter2], FakePriceClient())
+
+    assert reports[0]["status"] == "ok"
+    assert adapter2.received_since is not None
+    assert adapter2.received_since.tzinfo is not None
 
 
 def test_sync_records_error_and_continues_with_other_adapters(db_session):

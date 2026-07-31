@@ -24,6 +24,20 @@ def _to_comparable_utc(dt: datetime) -> datetime:
     return dt
 
 
+def _ensure_aware_utc(dt: datetime | None) -> datetime | None:
+    """Ensure a datetime read back from the DB is timezone-aware.
+
+    Mirrors `_to_comparable_utc` but in the opposite direction: adapters
+    (bitcoin.py, ethereum.py, kraken.py) compare `since` against their own
+    timezone-aware timestamps and raise `TypeError` if `since` is naive.
+    Since SQLite strips tzinfo on round trip, `since` must be normalized
+    back to aware UTC before being handed to `adapter.fetch_transactions`.
+    """
+    if dt is not None and dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _get_or_create_sync_state(session: Session, source_name: str, account_label: str) -> SyncState:
     state = session.execute(
         select(SyncState).where(
@@ -51,7 +65,7 @@ def sync_all(session: Session, adapters: list[TransactionAdapter], price_client)
     reports = []
     for adapter in adapters:
         state = _get_or_create_sync_state(session, adapter.source_name, adapter.account_label)
-        since = state.last_synced_at
+        since = _ensure_aware_utc(state.last_synced_at)
         try:
             normalized_txs = adapter.fetch_transactions(since)
             new_count = 0
