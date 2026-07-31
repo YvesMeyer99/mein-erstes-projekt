@@ -26,6 +26,22 @@ demselben `ETHERSCAN_API_KEY`. Sowohl native Coin-Transfers (ETH, BNB,
 MATIC, ...) als auch ERC-20-Token-Transfers (z.B. USDT, USDC) werden auf
 allen sechs Chains erfasst.
 
+## Coinbase
+
+Zusätzlich zu Bitcoin/EVM-Chains/Kraken wird automatisch dein Coinbase-App-
+Account (Retail, nicht Advanced Trade) mitsynchronisiert, sobald
+`COINBASE_API_KEY_NAME` und `COINBASE_API_PRIVATE_KEY` gesetzt sind. Alle
+Konten (BTC, ETH, EUR, ...) werden automatisch erkannt - keine manuelle
+Konten-Liste nötig.
+
+**Wichtig beim Anlegen des API-Keys:**
+- CDP Secret API Key mit **ECDSA-Schlüsseltyp** anlegen (nicht den seit
+  2025 defaultmäßigen Ed25519-Key - der wird von dieser API nicht
+  unterstützt).
+- Nur die Lese-Scopes `wallet:accounts:read` und
+  `wallet:transactions:read` vergeben - keine Trade-/Sende-/
+  Auszahlungsrechte.
+
 ### Bekannte Einschränkung: ERC-20-Token werden nicht CHF-bewertet
 
 ERC-20-Token-Transfers werden zwar vollständig erfasst (Menge, Sender/
