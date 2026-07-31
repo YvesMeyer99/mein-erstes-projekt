@@ -1,6 +1,5 @@
 import hashlib
 import hmac
-import urllib.parse
 
 from app.adapters.mexc_auth import build_signed_params, sign_mexc_params
 
@@ -62,9 +61,13 @@ def test_sign_mexc_params_percent_encodes_special_characters():
 
     signature = sign_mexc_params(params, secret)
 
+    # Hardcoded literal query string (not a fresh urlencode() call) so this
+    # test actually pins down urlencode's percent-encoding behavior rather
+    # than just checking self-consistency with the implementation.
+    expected_query_string = "note=hello+world+%26+more%3Dstuff&symbol=BTC%2FUSDT&unicode=caf%C3%A9"
     expected = hmac.new(
         secret.encode(),
-        urllib.parse.urlencode(params).encode(),
+        expected_query_string.encode(),
         hashlib.sha256,
     ).hexdigest()
     assert signature == expected
