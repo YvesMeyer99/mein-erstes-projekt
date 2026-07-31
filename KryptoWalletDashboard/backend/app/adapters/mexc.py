@@ -1,0 +1,111 @@
+import json
+from datetime import datetime, timezone
+from decimal import Decimal
+
+import requests
+
+from app.adapters.base import TransactionAdapter
+from app.adapters.mexc_auth import build_signed_params
+from app.schemas import NormalizedTransaction
+
+API_URL = "https://api.mexc.com"
+PAGE_LIMIT = 1000
+
+DEPOSIT_SUCCESS_STATUSES = {"5", "12"}
+WITHDRAWAL_SUCCESS_STATUS = "7"
+
+
+class MexcAdapter(TransactionAdapter):
+    source_type = "exchange"
+    source_name = "mexc"
+
+    def __init__(self, account_label: str, api_key: str, api_secret: str, trading_pairs: list):
+        super().__init__(account_label)
+        self.api_key = api_key
+        self.api_secret = api_secret
+        self.trading_pairs = trading_pairs
+
+    def _get(self, path: str, params: dict) -> list:
+        signed_params = build_signed_params(params, self.api_secret)
+        response = requests.get(
+            f"{API_URL}{path}",
+            params=signed_params,
+            headers={"X-MEXC-APIKEY": self.api_key},
+            timeout=10,
+        )
+        response.raise_for_status()
+        return response.json()
+
+    def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
+        results: list[NormalizedTransaction] = []
+        results.extend(self._fetch_deposits(since))
+        results.extend(self._fetch_withdrawals(since))
+        return results
+
+    def _fetch_all_records(self, path: str, since: datetime | None, time_field: str) -> list[dict]:
+        all_records: list[dict] = []
+        start_time_ms = int(since.timestamp() * 1000) if since is not None else None
+        while True:
+            params: dict = {"limit": PAGE_LIMIT}
+            if start_time_ms is not None:
+                params["startTime"] = start_time_ms
+            batch = self._get(path, params)
+            all_records.extend(batch)
+            if len(batch) < PAGE_LIMIT:
+                break
+            start_time_ms = max(int(r[time_field]) for r in batch) + 1
+        return all_records
+
+    def _fetch_deposits(self, since: datetime | None) -> list[NormalizedTransaction]:
+        results: list[NormalizedTransaction] = []
+        for record in self._fetch_all_records("/api/v3/capital/deposit/hisrec", since, "insertTime"):
+            if str(record.get("status")) not in DEPOSIT_SUCCESS_STATUSES:
+                continue
+            tx_id = record.get("txId")
+            if not tx_id:
+                continue
+            timestamp = datetime.fromtimestamp(int(record["insertTime"]) / 1000, tz=timezone.utc)
+            if since is not None and timestamp <= since:
+                continue
+            results.append(
+                NormalizedTransaction(
+                    timestamp=timestamp,
+                    source_type=self.source_type,
+                    source_name=self.source_name,
+                    account_label=self.account_label,
+                    tx_type="transfer_in",
+                    asset=record["coin"],
+                    amount=Decimal(str(record["amount"])),
+                    external_id=f"deposit-{tx_id}",
+                    raw_json=json.dumps(record),
+                )
+            )
+        return results
+
+    def _fetch_withdrawals(self, since: datetime | None) -> list[NormalizedTransaction]:
+        results: list[NormalizedTransaction] = []
+        for record in self._fetch_all_records("/api/v3/capital/withdraw/history", since, "applyTime"):
+            if str(record.get("status")) != WITHDRAWAL_SUCCESS_STATUS:
+                continue
+            timestamp = datetime.fromtimestamp(int(record["applyTime"]) / 1000, tz=timezone.utc)
+            if since is not None and timestamp <= since:
+                continue
+            fee_raw = record.get("transactionFee")
+            parsed_fee = Decimal(str(fee_raw)) if fee_raw else None
+            fee_amount = parsed_fee if parsed_fee else None
+            results.append(
+                NormalizedTransaction(
+                    timestamp=timestamp,
+                    source_type=self.source_type,
+                    source_name=self.source_name,
+                    account_label=self.account_label,
+                    tx_type="transfer_out",
+                    asset=record["coin"],
+                    amount=Decimal(str(record["amount"])),
+                    fee_amount=fee_amount,
+                    fee_asset=record["coin"] if fee_amount is not None else None,
+                    external_id=f"withdrawal-{record['id']}",
+                    raw_json=json.dumps(record),
+                )
+            )
+        return results
