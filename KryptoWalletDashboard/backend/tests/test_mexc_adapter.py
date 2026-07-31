@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -113,19 +113,46 @@ def test_non_success_withdrawal_status_is_skipped():
 
 @responses.activate
 def test_since_filters_out_older_deposits_and_withdrawals():
+    # tx-old sits well outside the 7-day SYNC_LOOKBACK window (~35 days
+    # before `since`), so it must still be excluded even with the lookback
+    # margin applied. tx-new is after `since` and always included.
+    since = datetime.fromtimestamp(1700050000, tz=timezone.utc)
+    old_time_ms = int((since - timedelta(days=35)).timestamp() * 1000)
     _mock_get(
         "/api/v3/capital/deposit/hisrec",
         [
-            _deposit("tx-old", "BTC", "0.1", "5", 1700000000000),
+            _deposit("tx-old", "BTC", "0.1", "5", old_time_ms),
             _deposit("tx-new", "BTC", "0.2", "5", 1700100000000),
         ],
     )
     _mock_get("/api/v3/capital/withdraw/history", [])
 
-    since = datetime.fromtimestamp(1700050000, tz=timezone.utc)
     results = _adapter().fetch_transactions(since)
 
     assert [r.external_id for r in results] == ["deposit-tx-new"]
+
+
+@responses.activate
+def test_since_lookback_margin_includes_recently_completed_deposit():
+    # `since` is the shared watermark; the deposit's insertTime is 3 days
+    # earlier, which a naive `timestamp <= since` filter would exclude. This
+    # simulates a deposit that was still "pending" (and thus never
+    # persisted) as of the previous sync's watermark -- driven forward by a
+    # faster-completing stream like withdrawals or trades -- and only
+    # completed later with its original, earlier insertTime. It must be
+    # re-fetched thanks to the 7-day lookback margin, or it would be lost
+    # forever (see SYNC_LOOKBACK comment in app/adapters/mexc.py).
+    since = datetime(2024, 3, 1, tzinfo=timezone.utc)
+    late_complete_time_ms = int(datetime(2024, 2, 27, tzinfo=timezone.utc).timestamp() * 1000)
+    _mock_get(
+        "/api/v3/capital/deposit/hisrec",
+        [_deposit("tx-late-complete", "BTC", "0.3", "5", late_complete_time_ms)],
+    )
+    _mock_get("/api/v3/capital/withdraw/history", [])
+
+    results = _adapter().fetch_transactions(since)
+
+    assert [r.external_id for r in results] == ["deposit-tx-late-complete"]
 
 
 @responses.activate
@@ -257,17 +284,21 @@ def test_fetches_trades_for_each_configured_pair_separately():
 
 @responses.activate
 def test_since_filters_out_older_trades():
+    # t-old sits well outside the 7-day SYNC_LOOKBACK window (~35 days
+    # before `since`), so it must still be excluded even with the lookback
+    # margin applied.
+    since = datetime.fromtimestamp(1700050000, tz=timezone.utc)
+    old_time_ms = int((since - timedelta(days=35)).timestamp() * 1000)
     _mock_get("/api/v3/capital/deposit/hisrec", [])
     _mock_get("/api/v3/capital/withdraw/history", [])
     _mock_get(
         "/api/v3/myTrades",
         [
-            _trade("t-old", "50000", "0.01", "500", True, 1700000000000),
+            _trade("t-old", "50000", "0.01", "500", True, old_time_ms),
             _trade("t-new", "50000", "0.02", "1000", True, 1700100000000),
         ],
     )
 
-    since = datetime.fromtimestamp(1700050000, tz=timezone.utc)
     results = _adapter(trading_pairs=[BTC_USDT]).fetch_transactions(since)
 
     trades = [r for r in results if r.tx_type == "swap"]

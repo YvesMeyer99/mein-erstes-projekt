@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 import requests
@@ -18,6 +18,28 @@ MAX_RETRIES = 3
 # MEXC's two documented "deposit completed" status codes: 5 = SUCCESS, 12 = COMPLETED.
 DEPOSIT_SUCCESS_STATUSES = {"5", "12"}
 WITHDRAWAL_SUCCESS_STATUS = "7"
+
+# fetch_transactions() combines three independent MEXC data streams --
+# deposits, withdrawals, and trades across every configured pair -- in one
+# call, but sync.py tracks a single shared last_synced_at watermark per
+# account_label across all of them (the max timestamp seen across every
+# stream). A deposit awaiting confirmations (status not in
+# DEPOSIT_SUCCESS_STATUSES) or a withdrawal still processing (status !=
+# WITHDRAWAL_SUCCESS_STATUS) is filtered out and never persisted. If it
+# later completes, it keeps its original insertTime/applyTime, which can be
+# well before the shared watermark (advanced by a *different*, faster
+# stream) -- so a naive `timestamp <= since` filter would silently and
+# permanently drop it, since there's nothing persisted yet for
+# _already_persisted() dedup to catch. Unlike Coinbase, MEXC's API also
+# supports server-side filtering via `startTime`, so the raw `since` must
+# never reach the API directly either -- the server would already exclude
+# the late-completing record before it's even seen client-side. To close
+# this gap we always widen the query window (both server-side startTime and
+# client-side filtering) by a trailing safety margin subtracted from
+# `since`, rather than trusting the watermark to be precise per stream.
+# Re-seeing an already-persisted transaction is a harmless no-op in sync.py
+# (dedup by external_id).
+SYNC_LOOKBACK = timedelta(days=7)
 
 
 class MexcAdapter(TransactionAdapter):
@@ -56,9 +78,13 @@ class MexcAdapter(TransactionAdapter):
 
     def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
         results: list[NormalizedTransaction] = []
-        results.extend(self._fetch_deposits(since))
-        results.extend(self._fetch_withdrawals(since))
-        results.extend(self._fetch_trades(since))
+        # Widen the effective query window by SYNC_LOOKBACK (see comment above)
+        # -- this is what actually gets sent as `startTime` to the API and
+        # used for client-side filtering across all three streams.
+        effective_since = since - SYNC_LOOKBACK if since is not None else None
+        results.extend(self._fetch_deposits(effective_since))
+        results.extend(self._fetch_withdrawals(effective_since))
+        results.extend(self._fetch_trades(effective_since))
         return results
 
     def _fetch_all_records(
