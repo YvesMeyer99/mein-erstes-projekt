@@ -20,6 +20,13 @@ class NormalizedTransaction(BaseModel):
     raw_json: str
 
 
+class PortfolioEntryOut(BaseModel):
+    asset: str
+    amount: Decimal
+    price_chf: Decimal | None
+    value_chf: Decimal | None
+
+
 class TransactionOut(BaseModel):
     id: int
     timestamp: datetime
