@@ -1,4 +1,5 @@
 import time
+from unittest.mock import patch
 
 import jwt as pyjwt
 import pytest
@@ -76,3 +77,29 @@ def test_two_calls_produce_different_nonces():
     token_b = build_coinbase_jwt("key-name", private_pem, "GET", "api.coinbase.com", "/v2/accounts")
 
     assert pyjwt.get_unverified_header(token_a)["nonce"] != pyjwt.get_unverified_header(token_b)["nonce"]
+
+
+def test_expired_jwt_is_rejected_when_exp_verification_is_enabled():
+    private_pem, public_key = _generate_test_key_pair()
+
+    # Build the token as if it had been issued 121+ seconds in the past, so
+    # its `exp` claim has already elapsed relative to real wall-clock time
+    # at decode time. PyJWT's `verify_exp` check (enabled by default) reads
+    # the current time at decode time via `datetime.now()`, not `time.time`,
+    # so patching `time.time` only during the build call is what makes this
+    # deterministic - no patching is needed around decode itself.
+    with patch("app.adapters.coinbase_auth.time.time", return_value=time.time() - 121):
+        token = build_coinbase_jwt("key-name", private_pem, "GET", "api.coinbase.com", "/v2/accounts")
+
+    with pytest.raises(pyjwt.ExpiredSignatureError):
+        pyjwt.decode(token, public_key, algorithms=["ES256"])
+
+
+def test_malformed_private_key_pem_raises_value_error():
+    with pytest.raises(ValueError):
+        build_coinbase_jwt("key-name", "not-a-real-pem", "GET", "api.coinbase.com", "/v2/accounts")
+
+
+def test_empty_private_key_pem_raises_value_error():
+    with pytest.raises(ValueError):
+        build_coinbase_jwt("key-name", "", "GET", "api.coinbase.com", "/v2/accounts")
