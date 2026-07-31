@@ -56,6 +56,26 @@ keine Preiszuordnung. Solche Transaktionen laufen ohne Fehler durch den
 Sync, erscheinen im CSV-Export aber mit leerem `Kurs CHF`/`Wert CHF` und
 müssen für die Steuererklärung manuell bewertet werden.
 
+## MEXC
+
+Zusätzlich zu Bitcoin/EVM-Chains/Kraken/Coinbase wird dein MEXC-Account
+mitsynchronisiert, sobald `MEXC_API_KEY` und `MEXC_API_SECRET` gesetzt
+sind. Ein-/Auszahlungen werden automatisch erfasst - keine Konfiguration
+nötig.
+
+**Trades brauchen manuelle Konfiguration:** MEXC bietet keinen "alle
+Trades"-Endpunkt - pro Abfrage muss ein konkretes Handelspaar angegeben
+werden. Trage in `MEXC_TRADING_PAIRS` jedes Paar ein, das du handelst
+(Format `SYMBOL:BASE:QUOTE`, z.B. `BTCUSDT:BTC:USDT`). Ohne konfigurierte
+Paare werden nur Ein-/Auszahlungen erfasst, keine Trades.
+
+**Wichtige Einschränkung: nur die letzten 30 Tage.** MEXCs Trade-API
+liefert grundsätzlich nur Trades der letzten 30 Tage, unabhängig vom
+Sync-Zeitpunkt. Synchronisiere daher **mindestens einmal im Monat**, um
+keine Trades zu verpassen. Ältere Trade-Historie musst du einmalig per
+CSV-Export auf der MEXC-Webseite (unterstützt bis zu 3 Jahre) manuell
+nachtragen - das kann dieses Tool nicht automatisch abrufen.
+
 ## Server starten
 
 ```bash
