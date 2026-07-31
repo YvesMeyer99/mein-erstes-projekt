@@ -215,6 +215,29 @@ def test_since_filters_out_older_transactions(monkeypatch):
 
 
 @responses.activate
+def test_since_lookback_margin_includes_recently_completed_transaction(monkeypatch):
+    monkeypatch.setattr(
+        "app.adapters.coinbase.build_coinbase_jwt", lambda *a, **k: "fake-jwt"
+    )
+    _mock_accounts([_account("acc-btc", "BTC")])
+    _mock_transactions(
+        "acc-btc",
+        [_tx("tx-late-complete", "buy", "0.1", "BTC", "2024-02-27T00:00:00Z")],
+    )
+
+    # `since` is 2024-03-01; the transaction's created_at (2024-02-27) is
+    # only 3 days earlier, which a naive `timestamp <= since` filter would
+    # exclude. This simulates a transaction that was still "pending" as of
+    # the previous sync's watermark and only completed later -- it must be
+    # re-fetched thanks to the 7-day lookback margin, or it would be lost
+    # forever (see SYNC_LOOKBACK comment in app/adapters/coinbase.py).
+    since = datetime(2024, 3, 1, tzinfo=timezone.utc)
+    results = _adapter().fetch_transactions(since)
+
+    assert [r.external_id for r in results] == ["tx-late-complete"]
+
+
+@responses.activate
 def test_iterates_transactions_across_multiple_accounts(monkeypatch):
     monkeypatch.setattr(
         "app.adapters.coinbase.build_coinbase_jwt", lambda *a, **k: "fake-jwt"

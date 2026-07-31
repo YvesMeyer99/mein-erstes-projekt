@@ -1,6 +1,6 @@
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 
 import requests
@@ -15,6 +15,24 @@ DIRECT_TYPE_MAP = {"buy": "buy", "sell": "sell"}
 TRANSFER_TYPES = {"send", "receive", "transfer"}
 
 MAX_RETRIES = 3
+
+# fetch_transactions() iterates multiple independent Coinbase sub-accounts
+# (BTC, ETH, EUR, ...) in one call, but sync.py tracks a single shared
+# last_synced_at watermark per account_label across all of them (the max
+# timestamp seen across every sub-account). A transaction that was still
+# "pending" during an earlier sync (e.g. a crypto deposit awaiting
+# confirmations, or an ACH-funded fiat purchase awaiting clearance) is
+# filtered out by the status != "completed" check and never persisted. If
+# it later completes, it keeps its original created_at timestamp, which
+# can be well before the shared watermark (set by a *different*
+# sub-account's newer activity) -- so a naive `timestamp <= since` filter
+# would silently and permanently drop it, since there's nothing persisted
+# yet for _already_persisted() dedup to catch. To close this gap we always
+# re-fetch a trailing window of history on every sync, re-filtering with a
+# safety margin subtracted from `since` rather than trusting the watermark
+# to be precise per sub-account. Re-seeing an already-persisted
+# transaction is a harmless no-op in sync.py (dedup by external_id).
+SYNC_LOOKBACK = timedelta(days=7)
 
 
 class CoinbaseAdapter(TransactionAdapter):
@@ -74,7 +92,8 @@ class CoinbaseAdapter(TransactionAdapter):
             return None
 
         timestamp = datetime.fromisoformat(tx["created_at"].replace("Z", "+00:00"))
-        if since is not None and timestamp <= since:
+        cutoff = since - SYNC_LOOKBACK if since is not None else None
+        if cutoff is not None and timestamp <= cutoff:
             return None
 
         amount_obj = tx["amount"]
