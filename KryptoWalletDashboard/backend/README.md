@@ -110,6 +110,14 @@ Zwangs-Sync nötig, um Trades nicht zu verpassen.
 
 Läuft danach auf `http://127.0.0.1:8000`. `uvicorn`'s CLI default host is `127.0.0.1` (localhost-only) — do NOT add `--host 0.0.0.0`, since this app has no authentication and is designed to run locally only.
 
+## Frontend
+
+Ein React-Frontend für dieses Backend liegt unter `../frontend/` - siehe
+`../frontend/README.md` für Setup. Das Backend muss zuerst laufen (siehe
+oben), danach das Frontend separat starten. CORS ist auf die
+Vite-Dev-Server-Origins (`http://localhost:5173`, `http://127.0.0.1:5173`)
+beschränkt - andere Origins werden vom Backend nicht akzeptiert.
+
 ## Manueller Smoke-Test
 
 1. `curl -X POST http://127.0.0.1:8000/api/sync` - stößt Sync für alle konfigurierten
