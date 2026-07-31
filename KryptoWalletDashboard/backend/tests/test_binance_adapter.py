@@ -5,6 +5,7 @@ from urllib.parse import parse_qs, urlparse
 import responses
 
 from app.adapters.binance import BinanceAdapter
+from app.config import TradingPairConfig
 
 API_BASE = "https://api.binance.com"
 NOW = datetime(2026, 8, 4, 12, 0, 0, tzinfo=timezone.utc)
@@ -221,3 +222,146 @@ def test_paginates_within_a_window_via_offset_until_short_page():
     assert len(deposit_calls) == 2
     assert _query(deposit_calls[0])["offset"][0] == "0"
     assert _query(deposit_calls[1])["offset"][0] == "1000"
+
+
+def _trade(trade_id, price, qty, quote_qty, is_buyer, time_ms, commission="0", commission_asset="BTC"):
+    return {
+        "id": trade_id,
+        "price": str(price),
+        "qty": str(qty),
+        "quoteQty": str(quote_qty),
+        "commission": str(commission),
+        "commissionAsset": commission_asset,
+        "time": time_ms,
+        "isBuyer": is_buyer,
+    }
+
+
+BTC_USDT = TradingPairConfig(symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT")
+
+
+@responses.activate
+def test_buy_trade_receives_base_asset_gives_up_quote_asset():
+    _mock_get("/sapi/v1/capital/deposit/hisrec", [])
+    _mock_get("/sapi/v1/capital/withdraw/history", [])
+    _mock_get(
+        "/api/v3/myTrades",
+        [_trade(1, "50000", "0.01", "500", True, _ms(NOW), commission="0.00001", commission_asset="BTC")],
+    )
+
+    results = _adapter(trading_pairs=[BTC_USDT], sync_start=NOW - timedelta(days=1)).fetch_transactions(None)
+
+    trades = [r for r in results if r.tx_type == "swap"]
+    assert len(trades) == 1
+    tx = trades[0]
+    assert tx.asset == "BTC"
+    assert tx.amount == Decimal("0.01")
+    assert tx.counter_asset == "USDT"
+    assert tx.counter_amount == Decimal("500")
+    assert tx.fee_amount == Decimal("0.00001")
+    assert tx.fee_asset == "BTC"
+    assert tx.external_id == "trade-BTCUSDT-1"
+
+
+@responses.activate
+def test_sell_trade_receives_quote_asset_gives_up_base_asset():
+    _mock_get("/sapi/v1/capital/deposit/hisrec", [])
+    _mock_get("/sapi/v1/capital/withdraw/history", [])
+    _mock_get(
+        "/api/v3/myTrades",
+        [_trade(2, "51000", "0.02", "1020", False, _ms(NOW), commission="1.02", commission_asset="USDT")],
+    )
+
+    results = _adapter(trading_pairs=[BTC_USDT], sync_start=NOW - timedelta(days=1)).fetch_transactions(None)
+
+    trades = [r for r in results if r.tx_type == "swap"]
+    assert len(trades) == 1
+    tx = trades[0]
+    assert tx.asset == "USDT"
+    assert tx.amount == Decimal("1020")
+    assert tx.counter_asset == "BTC"
+    assert tx.counter_amount == Decimal("0.02")
+    assert tx.fee_amount == Decimal("1.02")
+    assert tx.fee_asset == "USDT"
+
+
+@responses.activate
+def test_zero_commission_is_not_recorded():
+    _mock_get("/sapi/v1/capital/deposit/hisrec", [])
+    _mock_get("/sapi/v1/capital/withdraw/history", [])
+    _mock_get("/api/v3/myTrades", [_trade(3, "50000", "0.01", "500", True, _ms(NOW), commission="0")])
+
+    results = _adapter(trading_pairs=[BTC_USDT], sync_start=NOW - timedelta(days=1)).fetch_transactions(None)
+
+    tx = [r for r in results if r.tx_type == "swap"][0]
+    assert tx.fee_amount is None
+    assert tx.fee_asset is None
+
+
+@responses.activate
+def test_paginates_trades_via_from_id_until_short_page():
+    full_page = [_trade(i, "50000", "0.01", "500", True, _ms(NOW)) for i in range(1000)]
+    short_page = [_trade(1000, "50000", "0.01", "500", True, _ms(NOW))]
+    responses.add(responses.GET, f"{API_BASE}/api/v3/myTrades", json=full_page, status=200)
+    responses.add(responses.GET, f"{API_BASE}/api/v3/myTrades", json=short_page, status=200)
+    _mock_get("/sapi/v1/capital/deposit/hisrec", [])
+    _mock_get("/sapi/v1/capital/withdraw/history", [])
+
+    results = _adapter(trading_pairs=[BTC_USDT], sync_start=NOW - timedelta(days=1)).fetch_transactions(None)
+
+    trades = [r for r in results if r.tx_type == "swap"]
+    assert len(trades) == 1001
+    trade_calls = [c for c in responses.calls if "/api/v3/myTrades" in c.request.url]
+    assert len(trade_calls) == 2
+    assert _query(trade_calls[0])["fromId"][0] == "0"
+    assert _query(trade_calls[1])["fromId"][0] == "1000"
+
+
+@responses.activate
+def test_fetches_trades_for_each_configured_pair_separately():
+    _mock_get("/sapi/v1/capital/deposit/hisrec", [])
+    _mock_get("/sapi/v1/capital/withdraw/history", [])
+    eth_usdt = TradingPairConfig(symbol="ETHUSDT", base_asset="ETH", quote_asset="USDT")
+    responses.add(
+        responses.GET,
+        f"{API_BASE}/api/v3/myTrades",
+        json=[_trade("t-btc", "50000", "0.01", "500", True, _ms(NOW))],
+        match=[responses.matchers.query_param_matcher({"symbol": "BTCUSDT", "fromId": "0", "limit": "1000"}, strict_match=False)],
+    )
+    responses.add(
+        responses.GET,
+        f"{API_BASE}/api/v3/myTrades",
+        json=[_trade("t-eth", "3000", "0.5", "1500", True, _ms(NOW))],
+        match=[responses.matchers.query_param_matcher({"symbol": "ETHUSDT", "fromId": "0", "limit": "1000"}, strict_match=False)],
+    )
+
+    results = _adapter(trading_pairs=[BTC_USDT, eth_usdt], sync_start=NOW - timedelta(days=1)).fetch_transactions(None)
+
+    trades = [r for r in results if r.tx_type == "swap"]
+    assert {t.external_id for t in trades} == {"trade-BTCUSDT-t-btc", "trade-ETHUSDT-t-eth"}
+
+
+@responses.activate
+def test_no_configured_trading_pairs_means_no_trade_calls():
+    _mock_get("/sapi/v1/capital/deposit/hisrec", [])
+    _mock_get("/sapi/v1/capital/withdraw/history", [])
+
+    results = _adapter(trading_pairs=[], sync_start=NOW - timedelta(days=1)).fetch_transactions(None)
+
+    assert [r for r in results if r.tx_type == "swap"] == []
+    trade_calls = [c for c in responses.calls if "/api/v3/myTrades" in c.request.url]
+    assert len(trade_calls) == 0
+
+
+@responses.activate
+def test_trades_are_not_filtered_by_since_full_history_always_refetched():
+    _mock_get("/sapi/v1/capital/deposit/hisrec", [])
+    _mock_get("/sapi/v1/capital/withdraw/history", [])
+    old_trade_time = NOW - timedelta(days=400)
+    _mock_get("/api/v3/myTrades", [_trade(1, "50000", "0.01", "500", True, _ms(old_trade_time))])
+
+    since = NOW - timedelta(days=1)
+    results = _adapter(trading_pairs=[BTC_USDT], now=NOW).fetch_transactions(since)
+
+    trades = [r for r in results if r.tx_type == "swap"]
+    assert len(trades) == 1

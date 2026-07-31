@@ -181,4 +181,53 @@ class BinanceAdapter(TransactionAdapter):
         return results
 
     def _fetch_trades(self) -> list[NormalizedTransaction]:
-        return []
+        results: list[NormalizedTransaction] = []
+        for pair in self.trading_pairs:
+            results.extend(self._fetch_trades_for_pair(pair))
+        return results
+
+    def _fetch_trades_for_pair(self, pair: TradingPairConfig) -> list[NormalizedTransaction]:
+        records: list[dict] = []
+        from_id = 0
+        while True:
+            batch = self._get("/api/v3/myTrades", {"symbol": pair.symbol, "fromId": from_id, "limit": PAGE_LIMIT})
+            records.extend(batch)
+            if len(batch) < PAGE_LIMIT:
+                break
+            from_id = max(int(r["id"]) for r in batch) + 1
+
+        results = []
+        for record in records:
+            timestamp = datetime.fromtimestamp(int(record["time"]) / 1000, tz=timezone.utc)
+            qty = Decimal(str(record["qty"]))
+            quote_qty = Decimal(str(record["quoteQty"]))
+            commission_raw = record.get("commission")
+            parsed_commission = Decimal(str(commission_raw)) if commission_raw else None
+            commission = parsed_commission if parsed_commission else None
+            commission_asset = record.get("commissionAsset") if commission is not None else None
+
+            if record["isBuyer"]:
+                asset, amount = pair.base_asset, qty
+                counter_asset, counter_amount = pair.quote_asset, quote_qty
+            else:
+                asset, amount = pair.quote_asset, quote_qty
+                counter_asset, counter_amount = pair.base_asset, qty
+
+            results.append(
+                NormalizedTransaction(
+                    timestamp=timestamp,
+                    source_type=self.source_type,
+                    source_name=self.source_name,
+                    account_label=self.account_label,
+                    tx_type="swap",
+                    asset=asset,
+                    amount=amount,
+                    counter_asset=counter_asset,
+                    counter_amount=counter_amount,
+                    fee_amount=commission,
+                    fee_asset=commission_asset,
+                    external_id=f"trade-{pair.symbol}-{record['id']}",
+                    raw_json=json.dumps(record),
+                )
+            )
+        return results
