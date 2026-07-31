@@ -1,0 +1,87 @@
+from datetime import datetime, timezone
+from decimal import Decimal
+
+from app.models import Transaction
+from app.portfolio import compute_portfolio
+
+
+def _tx(**overrides):
+    kwargs = dict(
+        timestamp=datetime.now(timezone.utc),
+        source_type="chain",
+        source_name="bitcoin",
+        account_label="main",
+        tx_type="transfer_in",
+        asset="BTC",
+        amount=Decimal("1"),
+        external_id="id",
+        raw_json="{}",
+    )
+    kwargs.update(overrides)
+    return Transaction(**kwargs)
+
+
+def test_incoming_and_outgoing_transfers_net_out(db_session):
+    db_session.add(_tx(external_id="1", tx_type="transfer_in", amount=Decimal("1"), price_chf=Decimal("100"), value_chf=Decimal("100")))
+    db_session.add(_tx(external_id="2", tx_type="transfer_out", amount=Decimal("0.4")))
+    db_session.commit()
+
+    portfolio = compute_portfolio(db_session)
+
+    assert len(portfolio) == 1
+    assert portfolio[0]["asset"] == "BTC"
+    assert portfolio[0]["amount"] == Decimal("0.6")
+    assert portfolio[0]["price_chf"] == Decimal("100")
+    assert portfolio[0]["value_chf"] == Decimal("60")
+
+
+def test_zero_balance_asset_is_omitted(db_session):
+    db_session.add(_tx(external_id="1", tx_type="transfer_in", amount=Decimal("1")))
+    db_session.add(_tx(external_id="2", tx_type="transfer_out", amount=Decimal("1")))
+    db_session.commit()
+
+    assert compute_portfolio(db_session) == []
+
+
+def test_swap_moves_balance_between_assets(db_session):
+    db_session.add(
+        _tx(
+            external_id="1",
+            tx_type="swap",
+            asset="BTC",
+            amount=Decimal("0.01"),
+            counter_asset="ZEUR",
+            counter_amount=Decimal("500"),
+        )
+    )
+    db_session.commit()
+
+    portfolio = {row["asset"]: row for row in compute_portfolio(db_session)}
+    assert portfolio["BTC"]["amount"] == Decimal("0.01")
+    assert portfolio["ZEUR"]["amount"] == Decimal("-500")
+
+
+def test_fee_reduces_balance_of_fee_asset(db_session):
+    db_session.add(
+        _tx(
+            external_id="1",
+            tx_type="transfer_out",
+            asset="ETH",
+            amount=Decimal("1"),
+            fee_amount=Decimal("0.001"),
+            fee_asset="ETH",
+        )
+    )
+    db_session.commit()
+
+    portfolio = {row["asset"]: row for row in compute_portfolio(db_session)}
+    assert portfolio["ETH"]["amount"] == Decimal("-1.001")
+
+
+def test_missing_price_yields_none_value(db_session):
+    db_session.add(_tx(external_id="1", tx_type="transfer_in", amount=Decimal("1"), price_chf=None, value_chf=None))
+    db_session.commit()
+
+    portfolio = compute_portfolio(db_session)
+    assert portfolio[0]["price_chf"] is None
+    assert portfolio[0]["value_chf"] is None
