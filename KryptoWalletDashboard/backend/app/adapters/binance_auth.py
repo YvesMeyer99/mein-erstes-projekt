@@ -21,7 +21,11 @@ def sign_binance_params(params: dict, secret: str) -> str:
 def build_signed_params(params: dict, secret: str) -> dict:
     """Return a new params dict with a fresh millisecond timestamp and
     the computed signature attached, ready to send as a signed Binance
-    request's query parameters."""
+    request's query parameters.
+
+    Note: as with `sign_binance_params`, `params` values must be scalar
+    (str/int/etc.), not lists/tuples/dicts - see that function's
+    docstring for why."""
     signed = dict(params)
     signed["timestamp"] = int(time.time() * 1000)
     signed["signature"] = sign_binance_params(signed, secret)

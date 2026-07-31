@@ -53,3 +53,44 @@ def test_different_params_produce_different_signatures():
     sig_b = sign_binance_params({"symbol": "ETHUSDT"}, "secret")
 
     assert sig_a != sig_b
+
+
+def test_sign_binance_params_percent_encodes_special_characters():
+    params = {"note": "hello world & more=stuff", "symbol": "BTC/USDT", "unicode": "café"}
+    secret = "secret"
+
+    signature = sign_binance_params(params, secret)
+
+    # Hardcoded literal query string (not a fresh urlencode() call) so this
+    # test actually pins down urlencode's percent-encoding behavior rather
+    # than just checking self-consistency with the implementation.
+    expected_query_string = "note=hello+world+%26+more%3Dstuff&symbol=BTC%2FUSDT&unicode=caf%C3%A9"
+    expected = hmac.new(
+        secret.encode(),
+        expected_query_string.encode(),
+        hashlib.sha256,
+    ).hexdigest()
+    assert signature == expected
+
+
+def test_sign_binance_params_empty_secret_produces_valid_signature():
+    # hmac.new(b"", ...) is mechanically valid even though an empty
+    # secret would never be a real credential.
+    signature = sign_binance_params({"a": "1"}, "")
+
+    assert len(signature) == 64
+    assert all(c in "0123456789abcdef" for c in signature)
+
+
+def test_sign_binance_params_empty_params_does_not_raise():
+    signature = sign_binance_params({}, "secret")
+
+    expected = hmac.new(b"secret", b"", hashlib.sha256).hexdigest()
+    assert signature == expected
+
+
+def test_build_signed_params_empty_params_adds_timestamp_and_signature():
+    result = build_signed_params({}, "secret")
+
+    assert set(result.keys()) == {"timestamp", "signature"}
+    assert isinstance(result["timestamp"], int)
