@@ -132,3 +132,51 @@ def test_mexc_adapter_is_not_added_when_only_partially_configured(monkeypatch):
     adapters = build_adapters_from_config()
 
     assert not any(isinstance(a, MexcAdapter) for a in adapters)
+
+
+def test_binance_adapter_is_added_when_configured(monkeypatch):
+    from app.adapters.binance import BinanceAdapter
+    from app.config import TradingPairConfig
+
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "key")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "secret")
+    monkeypatch.setattr(
+        config, "BINANCE_TRADING_PAIRS", [TradingPairConfig(symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT")]
+    )
+    monkeypatch.setattr(config, "BINANCE_SYNC_START", None)
+
+    adapters = build_adapters_from_config()
+
+    binance_adapters = [a for a in adapters if isinstance(a, BinanceAdapter)]
+    assert len(binance_adapters) == 1
+    assert binance_adapters[0].account_label == "binance-main"
+    assert binance_adapters[0].trading_pairs[0].symbol == "BTCUSDT"
+
+
+def test_binance_adapter_is_not_added_when_only_partially_configured(monkeypatch):
+    from app.adapters.binance import BinanceAdapter
+
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "key")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_TRADING_PAIRS", [])
+    monkeypatch.setattr(config, "BINANCE_SYNC_START", None)
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, BinanceAdapter) for a in adapters)

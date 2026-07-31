@@ -70,3 +70,26 @@ def test_parse_trading_pairs_skips_malformed_entries():
     result = parse_trading_pairs("BTCUSDT:BTC,ETHUSDT:ETH:USDT")
 
     assert [p.symbol for p in result] == ["ETHUSDT"]
+
+
+def test_parse_sync_start_returns_none_for_empty():
+    from app.config import parse_sync_start
+
+    assert parse_sync_start(None) is None
+    assert parse_sync_start("") is None
+
+
+def test_parse_sync_start_parses_iso_date_as_utc_midnight():
+    from datetime import datetime, timezone
+
+    from app.config import parse_sync_start
+
+    result = parse_sync_start("2020-01-01")
+
+    assert result == datetime(2020, 1, 1, tzinfo=timezone.utc)
+
+
+def test_parse_sync_start_returns_none_for_invalid_format():
+    from app.config import parse_sync_start
+
+    assert parse_sync_start("not-a-date") is None

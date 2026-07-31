@@ -1,5 +1,6 @@
 from app import config
 from app.adapters.base import TransactionAdapter
+from app.adapters.binance import BinanceAdapter
 from app.adapters.bitcoin import BitcoinAdapter
 from app.adapters.coinbase import CoinbaseAdapter
 from app.adapters.evm import EvmAdapter
@@ -47,6 +48,16 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
                 api_key=config.MEXC_API_KEY,
                 api_secret=config.MEXC_API_SECRET,
                 trading_pairs=config.MEXC_TRADING_PAIRS,
+            )
+        )
+    if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
+        adapters.append(
+            BinanceAdapter(
+                account_label="binance-main",
+                api_key=config.BINANCE_API_KEY,
+                api_secret=config.BINANCE_API_SECRET,
+                trading_pairs=config.BINANCE_TRADING_PAIRS,
+                sync_start=config.BINANCE_SYNC_START,
             )
         )
     return adapters

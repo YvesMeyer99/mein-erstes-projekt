@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from datetime import datetime, timezone
 import os
 
 from dotenv import load_dotenv
@@ -46,6 +47,18 @@ def parse_trading_pairs(env_value: str | None) -> list[TradingPairConfig]:
     return pairs
 
 
+def parse_sync_start(env_value: str | None) -> datetime | None:
+    """Parse an optional 'YYYY-MM-DD' date string (e.g. Binance account
+    creation date) into a UTC midnight datetime. Returns None if unset or
+    malformed, in which case the caller falls back to its own default."""
+    if not env_value:
+        return None
+    try:
+        return datetime.strptime(env_value.strip(), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def normalize_pem_env_value(env_value: str | None) -> str:
     """PEM private keys are multi-line; when stored in a .env file they're
     typically written with literal backslash-n sequences instead of real
@@ -66,4 +79,8 @@ COINBASE_API_PRIVATE_KEY = normalize_pem_env_value(os.getenv("COINBASE_API_PRIVA
 MEXC_API_KEY = os.getenv("MEXC_API_KEY", "")
 MEXC_API_SECRET = os.getenv("MEXC_API_SECRET", "")
 MEXC_TRADING_PAIRS = parse_trading_pairs(os.getenv("MEXC_TRADING_PAIRS"))
+BINANCE_API_KEY = os.getenv("BINANCE_API_KEY", "")
+BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
+BINANCE_TRADING_PAIRS = parse_trading_pairs(os.getenv("BINANCE_TRADING_PAIRS"))
+BINANCE_SYNC_START = parse_sync_start(os.getenv("BINANCE_SYNC_START"))
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./krypto_dashboard.db")
