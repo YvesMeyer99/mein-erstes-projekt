@@ -57,3 +57,36 @@ def test_two_ethereum_wallets_each_produce_one_evm_adapter_per_chain(two_wallet_
     assert all(a.address == "0xdef" for a in savings_adapters)
     assert {a.source_name for a in main_adapters} == {c.chain_name for c in EVM_CHAINS}
     assert {a.source_name for a in savings_adapters} == {c.chain_name for c in EVM_CHAINS}
+
+
+def test_coinbase_adapter_is_added_when_configured(monkeypatch):
+    from app.adapters.coinbase import CoinbaseAdapter
+
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "organizations/org/apiKeys/key")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "fake-pem")
+
+    adapters = build_adapters_from_config()
+
+    coinbase_adapters = [a for a in adapters if isinstance(a, CoinbaseAdapter)]
+    assert len(coinbase_adapters) == 1
+    assert coinbase_adapters[0].account_label == "coinbase-main"
+    assert coinbase_adapters[0].api_key_name == "organizations/org/apiKeys/key"
+
+
+def test_coinbase_adapter_is_not_added_when_only_partially_configured(monkeypatch):
+    from app.adapters.coinbase import CoinbaseAdapter
+
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "organizations/org/apiKeys/key")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, CoinbaseAdapter) for a in adapters)

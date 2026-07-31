@@ -22,3 +22,18 @@ def test_parse_wallets_parses_multiple_entries_and_trims_whitespace():
         __import__("app.config", fromlist=["WalletConfig"]).WalletConfig(label="main", address="bc1qexample"),
         __import__("app.config", fromlist=["WalletConfig"]).WalletConfig(label="savings", address="bc1qother"),
     ]
+
+
+def test_coinbase_private_key_converts_escaped_newlines_to_real_newlines():
+    from app.config import normalize_pem_env_value
+
+    escaped = "-----BEGIN EC PRIVATE KEY-----\\nABC123\\n-----END EC PRIVATE KEY-----\\n"
+    result = normalize_pem_env_value(escaped)
+
+    assert result == "-----BEGIN EC PRIVATE KEY-----\nABC123\n-----END EC PRIVATE KEY-----\n"
+
+
+def test_normalize_pem_env_value_returns_empty_string_for_none():
+    from app.config import normalize_pem_env_value
+
+    assert normalize_pem_env_value(None) == ""

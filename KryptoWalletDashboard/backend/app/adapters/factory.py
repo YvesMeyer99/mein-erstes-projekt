@@ -1,6 +1,7 @@
 from app import config
 from app.adapters.base import TransactionAdapter
 from app.adapters.bitcoin import BitcoinAdapter
+from app.adapters.coinbase import CoinbaseAdapter
 from app.adapters.evm import EvmAdapter
 from app.adapters.evm_chains import EVM_CHAINS
 from app.adapters.kraken import KrakenAdapter
@@ -28,6 +29,14 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
                 account_label="kraken-main",
                 api_key=config.KRAKEN_API_KEY,
                 api_secret=config.KRAKEN_API_SECRET,
+            )
+        )
+    if config.COINBASE_API_KEY_NAME and config.COINBASE_API_PRIVATE_KEY:
+        adapters.append(
+            CoinbaseAdapter(
+                account_label="coinbase-main",
+                api_key_name=config.COINBASE_API_KEY_NAME,
+                private_key_pem=config.COINBASE_API_PRIVATE_KEY,
             )
         )
     return adapters
