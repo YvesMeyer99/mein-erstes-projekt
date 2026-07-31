@@ -76,6 +76,32 @@ keine Trades zu verpassen. Ältere Trade-Historie musst du einmalig per
 CSV-Export auf der MEXC-Webseite (unterstützt bis zu 3 Jahre) manuell
 nachtragen - das kann dieses Tool nicht automatisch abrufen.
 
+## Binance
+
+Zusätzlich zu Bitcoin/EVM-Chains/Kraken/Coinbase/MEXC wird dein Binance-
+Account mitsynchronisiert, sobald `BINANCE_API_KEY` und
+`BINANCE_API_SECRET` gesetzt sind. Ein-/Auszahlungen werden automatisch
+erfasst - keine Konfiguration nötig. Binance erlaubt pro Abfrage nur ein
+90-Tage-Fenster; das Tool paginiert das intern automatisch, du merkst
+davon nichts.
+
+**Erster Sync:** Ohne Zeitangabe liefert Binance bei Ein-/Auszahlungen
+nur die letzten 90 Tage. Setze optional `BINANCE_SYNC_START` (Format
+`YYYY-MM-DD`, z.B. dein Konto-Erstellungsdatum) als Startpunkt für den
+allerersten Sync. Ohne diese Angabe werden die letzten 5 Jahre
+abgedeckt.
+
+**Trades brauchen manuelle Konfiguration:** wie bei MEXC bietet Binance
+keinen "alle Trades"-Endpunkt - pro Abfrage muss ein konkretes
+Handelspaar angegeben werden. Trage in `BINANCE_TRADING_PAIRS` jedes
+Paar ein, das du handelst (Format `SYMBOL:BASE:QUOTE`, z.B.
+`BTCUSDT:BTC:USDT`). Ohne konfigurierte Paare werden nur
+Ein-/Auszahlungen erfasst, keine Trades.
+
+**Kein 30-Tage-Limit bei Trades:** anders als bei MEXC ist bei Binance
+die komplette Handelshistorie über die API abrufbar - kein monatlicher
+Zwangs-Sync nötig, um Trades nicht zu verpassen.
+
 ## Server starten
 
 ```bash
