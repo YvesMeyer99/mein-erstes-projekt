@@ -284,3 +284,23 @@ def test_no_configured_trading_pairs_means_no_trade_calls():
     assert [r for r in results if r.tx_type == "swap"] == []
     trade_calls = [c for c in responses.calls if "/api/v3/myTrades" in c.request.url]
     assert len(trade_calls) == 0
+
+
+@responses.activate
+def test_paginates_trades_until_short_page():
+    _mock_get("/api/v3/capital/deposit/hisrec", [])
+    _mock_get("/api/v3/capital/withdraw/history", [])
+    full_page = [
+        _trade(f"t-{i}", "50000", "0.01", "500", True, 1700000000000 + i * 1000)
+        for i in range(1000)
+    ]
+    short_page = [_trade("t-last", "50000", "0.01", "500", True, 1700002000000)]
+    responses.add(responses.GET, f"{API_BASE}/api/v3/myTrades", json=full_page, status=200)
+    responses.add(responses.GET, f"{API_BASE}/api/v3/myTrades", json=short_page, status=200)
+
+    results = _adapter(trading_pairs=[BTC_USDT]).fetch_transactions(None)
+
+    trades = [r for r in results if r.tx_type == "swap"]
+    assert len(trades) == 1001
+    trade_calls = [c for c in responses.calls if "/api/v3/myTrades" in c.request.url]
+    assert len(trade_calls) == 2

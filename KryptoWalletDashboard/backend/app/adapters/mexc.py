@@ -61,11 +61,19 @@ class MexcAdapter(TransactionAdapter):
         results.extend(self._fetch_trades(since))
         return results
 
-    def _fetch_all_records(self, path: str, since: datetime | None, time_field: str) -> list[dict]:
+    def _fetch_all_records(
+        self,
+        path: str,
+        since: datetime | None,
+        time_field: str,
+        extra_params: dict | None = None,
+    ) -> list[dict]:
         all_records: list[dict] = []
         start_time_ms = int(since.timestamp() * 1000) if since is not None else None
         while True:
             params: dict = {"limit": PAGE_LIMIT}
+            if extra_params:
+                params.update(extra_params)
             if start_time_ms is not None:
                 params["startTime"] = start_time_ms
             batch = self._get(path, params)
@@ -143,10 +151,9 @@ class MexcAdapter(TransactionAdapter):
     def _fetch_trades_for_pair(
         self, pair: TradingPairConfig, since: datetime | None
     ) -> list[NormalizedTransaction]:
-        params: dict = {"symbol": pair.symbol, "limit": PAGE_LIMIT}
-        if since is not None:
-            params["startTime"] = int(since.timestamp() * 1000)
-        records = self._get("/api/v3/myTrades", params)
+        records = self._fetch_all_records(
+            "/api/v3/myTrades", since, "time", extra_params={"symbol": pair.symbol}
+        )
 
         results = []
         for record in records:
