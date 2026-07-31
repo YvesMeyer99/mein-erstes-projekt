@@ -42,6 +42,18 @@ class CoinGeckoPriceClient:
             if attempt < MAX_RETRIES - 1:
                 time.sleep(2**attempt)
 
+        # A 4xx response (other than an exhausted-retry 429) means CoinGecko
+        # has no price data for this coin/date combo -- typically a date
+        # older than the free tier's ~365-day history window. That's "no
+        # data available", not a real failure, so it must not raise and
+        # abort the whole sync batch; treat it the same as a 200 response
+        # with an empty market_data body (see below): return None. Anything
+        # else (a 429 that survived all retries, or a 5xx/network-level
+        # problem) is a genuine failure and should still raise via
+        # raise_for_status() so it surfaces via last_error and aborts the
+        # batch, same as before.
+        if response.status_code != 429 and 400 <= response.status_code < 500:
+            return None
         response.raise_for_status()
         price = response.json().get("market_data", {}).get("current_price", {}).get("chf")
         return Decimal(str(price)) if price is not None else None

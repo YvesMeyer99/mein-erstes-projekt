@@ -79,6 +79,25 @@ def test_client_retries_on_429_then_succeeds(mock_sleep):
 
 
 @responses.activate
+def test_client_returns_none_on_401_instead_of_raising():
+    # CoinGecko's free tier returns a 401 (or 404, depending on the
+    # coin/date combo) when historical data isn't available for the
+    # requested date -- typically because it's older than the ~365-day
+    # window the free tier serves. That must be treated as "no price data",
+    # not a hard failure.
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/coins/bitcoin/history",
+        status=401,
+    )
+
+    client = CoinGeckoPriceClient()
+    price = client.get_price_chf("BTC", date(2018, 1, 15))
+
+    assert price is None
+
+
+@responses.activate
 def test_get_or_fetch_price_chf_uses_cache_on_second_call(db_session):
     responses.add(
         responses.GET,

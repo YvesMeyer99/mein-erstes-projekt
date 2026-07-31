@@ -1,8 +1,11 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import responses
+
 from app.adapters.base import TransactionAdapter
 from app.models import SyncState, Transaction
+from app.prices.coingecko import CoinGeckoPriceClient
 from app.schemas import NormalizedTransaction
 from app.sync import sync_all
 
@@ -205,3 +208,44 @@ def test_sync_handles_missing_price_gracefully(db_session):
     saved = db_session.query(Transaction).one()
     assert saved.price_chf is None
     assert saved.value_chf is None
+
+
+@responses.activate
+def test_sync_401_price_lookup_for_one_tx_does_not_abort_rest_of_batch(db_session):
+    # Regression test: a CoinGecko 401 for one transaction's price lookup
+    # (e.g. a too-old date on the free tier) must not raise out of
+    # get_price_chf and abort the entire adapter's sync batch via sync_all's
+    # per-adapter except/rollback. Only that one transaction should end up
+    # with price_chf=None -- other transactions in the same
+    # fetch_transactions() result must still persist successfully.
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/coins/bitcoin/history",
+        status=401,
+    )
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/coins/ethereum/history",
+        json={"market_data": {"current_price": {"chf": "2500.0"}}},
+        status=200,
+    )
+
+    adapter = FakeAdapter(
+        "main",
+        transactions=[
+            _tx("t-no-historical-price", asset="BTC"),
+            _tx("t-has-price", asset="ETH"),
+        ],
+    )
+    reports = sync_all(db_session, [adapter], CoinGeckoPriceClient())
+
+    assert reports == [
+        {"source_name": "fake", "account_label": "main", "status": "ok", "new_transactions": 2}
+    ]
+    saved = {tx.external_id: tx for tx in db_session.query(Transaction).all()}
+    assert saved["t-no-historical-price"].price_chf is None
+    assert saved["t-no-historical-price"].value_chf is None
+    assert saved["t-has-price"].price_chf == Decimal("2500.0")
+
+    state = db_session.query(SyncState).one()
+    assert state.last_error is None
