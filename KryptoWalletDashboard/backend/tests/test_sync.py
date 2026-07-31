@@ -54,7 +54,7 @@ class TzCheckingAdapter(TransactionAdapter):
         return self._transactions
 
 
-def _tx(external_id, amount="1", tx_type="transfer_in", asset="FAKE"):
+def _tx(external_id, amount="1", tx_type="transfer_in", asset="FAKE", fee_amount=None, fee_asset=None):
     return NormalizedTransaction(
         timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
         source_type="chain",
@@ -63,6 +63,8 @@ def _tx(external_id, amount="1", tx_type="transfer_in", asset="FAKE"):
         tx_type=tx_type,
         asset=asset,
         amount=Decimal(amount),
+        fee_amount=Decimal(fee_amount) if fee_amount is not None else None,
+        fee_asset=fee_asset,
         external_id=external_id,
         raw_json="{}",
     )
@@ -77,6 +79,22 @@ def test_sync_persists_new_transactions_and_enriches_price(db_session):
     assert saved.external_id == "t1"
     assert saved.price_chf == Decimal("100")
     assert saved.value_chf == Decimal("100")
+
+
+def test_sync_enriches_fee_price_when_fee_amount_and_asset_are_present(db_session):
+    # 0.5 is exactly representable in binary floating point, avoiding
+    # SQLite's Numeric-as-float round-trip drift (e.g. Decimal("0.1") comes
+    # back as Decimal("0.100000000000000006")) so the assertion below can
+    # use an exact equality check.
+    adapter = FakeAdapter(
+        "main", transactions=[_tx("t1", fee_amount="0.5", fee_asset="FAKE")]
+    )
+    sync_all(db_session, [adapter], FakePriceClient(Decimal("100")))
+
+    saved = db_session.query(Transaction).one()
+    assert saved.fee_amount == Decimal("0.5")
+    assert saved.fee_asset == "FAKE"
+    assert saved.fee_value_chf == Decimal("100") * Decimal("0.5")
 
 
 def test_sync_skips_already_persisted_transactions(db_session):
