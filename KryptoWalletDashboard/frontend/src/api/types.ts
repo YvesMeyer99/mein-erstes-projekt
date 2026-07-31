@@ -31,13 +31,9 @@ export interface TransactionFilters {
   account_label?: string;
 }
 
-export interface SyncResult {
-  source_name: string;
-  account_label: string;
-  status: "ok" | "error";
-  new_transactions?: number;
-  error?: string;
-}
+export type SyncResult =
+  | { source_name: string; account_label: string; status: "ok"; new_transactions: number }
+  | { source_name: string; account_label: string; status: "error"; error: string };
 
 export interface SyncResponse {
   results: SyncResult[];

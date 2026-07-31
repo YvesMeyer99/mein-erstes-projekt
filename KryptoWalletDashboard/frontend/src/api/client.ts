@@ -13,10 +13,18 @@ function buildQuery(filters: TransactionFilters): string {
   return query ? `?${query}` : "";
 }
 
+async function errorDetail(response: Response): Promise<string> {
+  const body = await response.json().catch(() => null);
+  if (body && typeof body === "object" && "detail" in body) {
+    return typeof body.detail === "string" ? body.detail : JSON.stringify(body.detail);
+  }
+  return String(response.status);
+}
+
 export async function fetchPortfolio(): Promise<PortfolioEntry[]> {
   const response = await fetch(`${API_BASE}/api/portfolio`);
   if (!response.ok) {
-    throw new Error(`Portfolio-Abfrage fehlgeschlagen: ${response.status}`);
+    throw new Error(`Portfolio-Abfrage fehlgeschlagen: ${await errorDetail(response)}`);
   }
   return response.json();
 }
@@ -24,7 +32,7 @@ export async function fetchPortfolio(): Promise<PortfolioEntry[]> {
 export async function fetchTransactions(filters: TransactionFilters = {}): Promise<Transaction[]> {
   const response = await fetch(`${API_BASE}/api/transactions${buildQuery(filters)}`);
   if (!response.ok) {
-    throw new Error(`Transaktions-Abfrage fehlgeschlagen: ${response.status}`);
+    throw new Error(`Transaktions-Abfrage fehlgeschlagen: ${await errorDetail(response)}`);
   }
   return response.json();
 }
@@ -36,7 +44,7 @@ export function exportUrl(filters: TransactionFilters = {}): string {
 export async function triggerSync(): Promise<SyncResponse> {
   const response = await fetch(`${API_BASE}/api/sync`, { method: "POST" });
   if (!response.ok) {
-    throw new Error(`Sync fehlgeschlagen: ${response.status}`);
+    throw new Error(`Sync fehlgeschlagen: ${await errorDetail(response)}`);
   }
   return response.json();
 }

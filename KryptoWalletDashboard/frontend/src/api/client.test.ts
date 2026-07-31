@@ -30,6 +30,12 @@ describe("fetchPortfolio", () => {
 
     await expect(fetchPortfolio()).rejects.toThrow();
   });
+
+  it("includes the backend's error detail in the thrown message", async () => {
+    mockFetchOnce({ detail: "Ungültiger Datumsbereich" }, false, 422);
+
+    await expect(fetchPortfolio()).rejects.toThrow(/Ungültiger Datumsbereich/);
+  });
 });
 
 describe("fetchTransactions", () => {
@@ -60,6 +66,12 @@ describe("fetchTransactions", () => {
     const calledUrl = (fetch as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(calledUrl).toContain("source_name=binance");
     expect(calledUrl).not.toContain("tx_type");
+  });
+
+  it("includes the backend's error detail in the thrown message", async () => {
+    mockFetchOnce({ detail: "Ungültiger Datumsbereich" }, false, 422);
+
+    await expect(fetchTransactions()).rejects.toThrow(/Ungültiger Datumsbereich/);
   });
 });
 
@@ -97,5 +109,11 @@ describe("triggerSync", () => {
     mockFetchOnce(null, false, 500);
 
     await expect(triggerSync()).rejects.toThrow();
+  });
+
+  it("includes the backend's error detail in the thrown message", async () => {
+    mockFetchOnce({ detail: "Ungültiger Datumsbereich" }, false, 422);
+
+    await expect(triggerSync()).rejects.toThrow(/Ungültiger Datumsbereich/);
   });
 });

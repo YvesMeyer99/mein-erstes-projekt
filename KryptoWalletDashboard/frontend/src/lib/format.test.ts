@@ -20,4 +20,12 @@ describe("formatChf", () => {
     expect(result).toContain("12");
     expect(result).toContain("50");
   });
+
+  it("formats an empty string as an em dash placeholder", () => {
+    expect(formatChf("")).toBe("–");
+  });
+
+  it("formats a non-numeric string as an em dash placeholder", () => {
+    expect(formatChf("not-a-number")).toBe("–");
+  });
 });
