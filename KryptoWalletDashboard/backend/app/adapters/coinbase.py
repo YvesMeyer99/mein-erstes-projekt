@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime
 from decimal import Decimal
 
@@ -13,6 +14,8 @@ HOST = "api.coinbase.com"
 DIRECT_TYPE_MAP = {"buy": "buy", "sell": "sell"}
 TRANSFER_TYPES = {"send", "receive", "transfer"}
 
+MAX_RETRIES = 3
+
 
 class CoinbaseAdapter(TransactionAdapter):
     source_type = "exchange"
@@ -25,13 +28,20 @@ class CoinbaseAdapter(TransactionAdapter):
         self.private_key_pem = private_key_pem
 
     def _get(self, path: str, params: dict) -> dict:
-        token = build_coinbase_jwt(self.api_key_name, self.private_key_pem, "GET", HOST, path)
-        response = requests.get(
-            f"https://{HOST}{path}",
-            params=params,
-            headers={"Authorization": f"Bearer {token}"},
-            timeout=10,
-        )
+        response = None
+        for attempt in range(MAX_RETRIES):
+            token = build_coinbase_jwt(self.api_key_name, self.private_key_pem, "GET", HOST, path)
+            response = requests.get(
+                f"https://{HOST}{path}",
+                params=params,
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if response.status_code != 429:
+                break
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(2**attempt)
+
         response.raise_for_status()
         return response.json()
 
@@ -69,6 +79,8 @@ class CoinbaseAdapter(TransactionAdapter):
 
         amount_obj = tx["amount"]
         signed_amount = Decimal(amount_obj["amount"])
+        if signed_amount == 0:
+            return None
         asset = amount_obj["currency"]
 
         tx_type = DIRECT_TYPE_MAP.get(tx["type"])

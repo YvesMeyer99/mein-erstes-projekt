@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import patch
 
 import responses
 
@@ -123,6 +124,23 @@ def test_positive_send_is_transfer_in_negative_send_is_transfer_out(monkeypatch)
 
 
 @responses.activate
+def test_zero_amount_send_or_receive_is_skipped(monkeypatch):
+    monkeypatch.setattr(
+        "app.adapters.coinbase.build_coinbase_jwt", lambda *a, **k: "fake-jwt"
+    )
+    _mock_accounts([_account("acc-eth", "ETH")])
+    _mock_transactions(
+        "acc-eth",
+        [
+            _tx("tx-zero-in", "receive", "0", "ETH", "2024-01-15T09:00:00Z"),
+            _tx("tx-zero-out", "send", "-0", "ETH", "2024-01-15T09:30:00Z"),
+        ],
+    )
+
+    assert _adapter().fetch_transactions(None) == []
+
+
+@responses.activate
 def test_unrecognized_type_is_skipped(monkeypatch):
     monkeypatch.setattr(
         "app.adapters.coinbase.build_coinbase_jwt", lambda *a, **k: "fake-jwt"
@@ -227,3 +245,42 @@ def test_paginates_accounts_and_transactions_until_short_page(monkeypatch):
     account_calls = [c for c in responses.calls if c.request.url.split("?")[0] == f"{API_BASE}/v2/accounts"]
     assert len(account_calls) == 2
     assert "starting_after=acc-" in account_calls[1].request.url
+
+
+@responses.activate
+@patch("app.adapters.coinbase.time.sleep")
+def test_retries_on_429_then_succeeds(mock_sleep, monkeypatch):
+    monkeypatch.setattr(
+        "app.adapters.coinbase.build_coinbase_jwt", lambda *a, **k: "fake-jwt"
+    )
+    responses.add(responses.GET, f"{API_BASE}/v2/accounts", status=429)
+    responses.add(responses.GET, f"{API_BASE}/v2/accounts", status=429)
+    _mock_accounts([_account("acc-btc", "BTC")])
+    _mock_transactions(
+        "acc-btc",
+        [_tx("tx1", "buy", "0.5", "BTC", "2024-01-15T10:00:00Z")],
+    )
+
+    results = _adapter().fetch_transactions(None)
+
+    assert len(results) == 1
+    assert results[0].external_id == "tx1"
+    account_calls = [c for c in responses.calls if c.request.url.split("?")[0] == f"{API_BASE}/v2/accounts"]
+    assert len(account_calls) == 3
+    assert mock_sleep.call_count == 2
+    mock_sleep.assert_any_call(1)
+    mock_sleep.assert_any_call(2)
+
+
+@responses.activate
+def test_persistent_http_error_raises(monkeypatch):
+    monkeypatch.setattr(
+        "app.adapters.coinbase.build_coinbase_jwt", lambda *a, **k: "fake-jwt"
+    )
+    responses.add(responses.GET, f"{API_BASE}/v2/accounts", status=401)
+
+    try:
+        _adapter().fetch_transactions(None)
+        assert False, "expected an exception to be raised"
+    except Exception as exc:
+        assert "401" in str(exc)
