@@ -26,6 +26,17 @@ demselben `ETHERSCAN_API_KEY`. Sowohl native Coin-Transfers (ETH, BNB,
 MATIC, ...) als auch ERC-20-Token-Transfers (z.B. USDT, USDC) werden auf
 allen sechs Chains erfasst.
 
+### Bekannte Einschränkung: ERC-20-Token werden nicht CHF-bewertet
+
+ERC-20-Token-Transfers werden zwar vollständig erfasst (Menge, Sender/
+Empfänger, Zeitstempel), aber **nicht automatisch in CHF bewertet**. Die
+CHF-Preisermittlung (`COINGECKO_ID_MAP` in `app/prices/coingecko.py`) kennt
+aktuell nur vier native Assets: BTC, ETH, BNB und MATIC. Für alle anderen
+Token - inklusive der oben genannten Beispiele USDT und USDC - gibt es
+keine Preiszuordnung. Solche Transaktionen laufen ohne Fehler durch den
+Sync, erscheinen im CSV-Export aber mit leerem `Kurs CHF`/`Wert CHF` und
+müssen für die Steuererklärung manuell bewertet werden.
+
 ## Server starten
 
 ```bash
