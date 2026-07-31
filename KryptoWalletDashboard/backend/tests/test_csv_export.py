@@ -37,7 +37,9 @@ def test_export_includes_header_and_all_columns(db_session):
 
     assert len(rows) == 1
     row = rows[0]
-    assert row["Datum"] == "2024-01-15T00:00:00"
+    # Timestamps round-trip as timezone-aware UTC, so the ISO string carries
+    # an explicit +00:00 offset instead of being ambiguous about timezone.
+    assert row["Datum"] == "2024-01-15T00:00:00+00:00"
     assert row["Chain/Boerse"] == "bitcoin"
     assert row["Wallet"] == "main"
     assert row["Typ"] == "transfer_in"

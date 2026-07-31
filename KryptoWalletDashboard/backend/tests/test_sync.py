@@ -114,10 +114,7 @@ def test_sync_uses_last_synced_at_as_since_on_second_run(db_session):
     sync_all(db_session, [adapter2], FakePriceClient())
 
     state = db_session.query(SyncState).one()
-    # `received_since` is normalized to timezone-aware before being handed to
-    # adapters, while `state.last_synced_at` comes back naive from SQLite's
-    # DateTime(timezone=True) round trip -- compare on wall-clock value only.
-    assert adapter2.received_since.replace(tzinfo=None) == state.last_synced_at.replace(tzinfo=None)
+    assert adapter2.received_since == state.last_synced_at
 
 
 def test_sync_passes_timezone_aware_since_to_adapter_on_second_run(db_session):

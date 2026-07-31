@@ -1,41 +1,9 @@
-from datetime import datetime, timezone
-
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.base import TransactionAdapter
 from app.models import SyncState, Transaction
 from app.prices.coingecko import get_or_fetch_price_chf
-
-
-def _to_comparable_utc(dt: datetime) -> datetime:
-    """Normalize to a naive UTC datetime for comparison.
-
-    SQLite does not actually persist tzinfo: a timezone-aware datetime
-    written to a `DateTime(timezone=True)` column comes back naive after
-    a round trip through the database (e.g. after `session.commit()`
-    expires the object). To compare such a value against a fresh,
-    timezone-aware timestamp from an adapter without raising
-    `TypeError: can't compare offset-naive and offset-aware datetimes`,
-    both sides are normalized to naive UTC here.
-    """
-    if dt.tzinfo is not None:
-        return dt.astimezone(timezone.utc).replace(tzinfo=None)
-    return dt
-
-
-def _ensure_aware_utc(dt: datetime | None) -> datetime | None:
-    """Ensure a datetime read back from the DB is timezone-aware.
-
-    Mirrors `_to_comparable_utc` but in the opposite direction: adapters
-    (bitcoin.py, ethereum.py, kraken.py) compare `since` against their own
-    timezone-aware timestamps and raise `TypeError` if `since` is naive.
-    Since SQLite strips tzinfo on round trip, `since` must be normalized
-    back to aware UTC before being handed to `adapter.fetch_transactions`.
-    """
-    if dt is not None and dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
 
 
 def _get_or_create_sync_state(session: Session, source_name: str, account_label: str) -> SyncState:
@@ -65,7 +33,7 @@ def sync_all(session: Session, adapters: list[TransactionAdapter], price_client)
     reports = []
     for adapter in adapters:
         state = _get_or_create_sync_state(session, adapter.source_name, adapter.account_label)
-        since = _ensure_aware_utc(state.last_synced_at)
+        since = state.last_synced_at
         try:
             normalized_txs = adapter.fetch_transactions(since)
             new_count = 0
@@ -105,9 +73,7 @@ def sync_all(session: Session, adapters: list[TransactionAdapter], price_client)
 
             if normalized_txs:
                 latest_timestamp = max(ntx.timestamp for ntx in normalized_txs)
-                if state.last_synced_at is None or _to_comparable_utc(
-                    latest_timestamp
-                ) > _to_comparable_utc(state.last_synced_at):
+                if state.last_synced_at is None or latest_timestamp > state.last_synced_at:
                     state.last_synced_at = latest_timestamp
             state.last_error = None
             session.commit()

@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Date, DateTime, String, UniqueConstraint
@@ -26,6 +26,37 @@ class ExactDecimal(TypeDecorator):
         return Decimal(value) if value is not None else None
 
 
+class UTCDateTime(TypeDecorator):
+    """Stores a datetime as timezone-aware UTC, even on SQLite.
+
+    SQLAlchemy's plain DateTime(timezone=True), when bound to a SQLite
+    column, does not persist tzinfo: a timezone-aware datetime written in
+    comes back naive after a round trip through the database (e.g. after
+    `session.commit()` expires the object and it is re-queried). Every
+    datetime this application writes to such a column is already
+    constructed as timezone-aware UTC (adapters build timestamps via
+    `datetime.fromtimestamp(..., tz=timezone.utc)`), so a naive value
+    reaching `process_bind_param` indicates a bug upstream rather than a
+    legitimate local time to coerce -- fail loudly instead of silently
+    guessing the timezone. On the way out, `process_result_value`
+    reattaches UTC tzinfo that SQLite dropped, restoring the original
+    aware value.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            raise ValueError("UTCDateTime requires a timezone-aware datetime")
+        return value
+
+    def process_result_value(self, value, dialect):
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -40,7 +71,7 @@ class Transaction(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    timestamp: Mapped[datetime] = mapped_column(UTCDateTime)
     source_type: Mapped[str] = mapped_column(String(20))
     source_name: Mapped[str] = mapped_column(String(50))
     account_label: Mapped[str] = mapped_column(String(100))
@@ -79,5 +110,5 @@ class SyncState(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     source_name: Mapped[str] = mapped_column(String(50))
     account_label: Mapped[str] = mapped_column(String(100))
-    last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_synced_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     last_error: Mapped[str | None] = mapped_column(String, nullable=True)
