@@ -85,3 +85,29 @@ def test_missing_price_yields_none_value(db_session):
     portfolio = compute_portfolio(db_session)
     assert portfolio[0]["price_chf"] is None
     assert portfolio[0]["value_chf"] is None
+
+
+def test_latest_price_is_chosen_by_timestamp_not_insertion_order(db_session):
+    newer = _tx(
+        external_id="newer",
+        tx_type="transfer_in",
+        amount=Decimal("1"),
+        price_chf=Decimal("200"),
+        value_chf=Decimal("200"),
+        timestamp=datetime(2026, 6, 1, tzinfo=timezone.utc),
+    )
+    older = _tx(
+        external_id="older",
+        tx_type="transfer_in",
+        amount=Decimal("1"),
+        price_chf=Decimal("50"),
+        value_chf=Decimal("50"),
+        timestamp=datetime(2026, 1, 1, tzinfo=timezone.utc),
+    )
+    # Inserted in reverse chronological order: newer row added first, older row added second.
+    db_session.add(newer)
+    db_session.add(older)
+    db_session.commit()
+
+    portfolio = {row["asset"]: row for row in compute_portfolio(db_session)}
+    assert portfolio["BTC"]["price_chf"] == Decimal("200")

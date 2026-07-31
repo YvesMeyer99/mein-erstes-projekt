@@ -10,7 +10,7 @@ OUTFLOW_TYPES = {"transfer_out", "fee", "sell"}
 
 
 def compute_portfolio(session: Session) -> list[dict]:
-    rows = session.execute(select(Transaction)).scalars().all()
+    rows = session.execute(select(Transaction).order_by(Transaction.timestamp)).scalars().all()
 
     balances: dict[str, Decimal] = {}
     latest_price_per_unit: dict[str, Decimal] = {}
