@@ -113,6 +113,50 @@ def test_latest_price_is_chosen_by_timestamp_not_insertion_order(db_session):
     assert portfolio["BTC"]["price_chf"] == Decimal("200")
 
 
+def test_onchain_and_kraken_holdings_of_same_asset_combine_into_one_line(db_session):
+    # Regression test for the reported bug: an on-chain Bitcoin wallet and a
+    # Kraken account both holding BTC used to show up as two separate
+    # portfolio lines, because Kraken's raw ledger code ("XBT") was stored
+    # as-is instead of being normalized to "BTC". The fix normalizes
+    # asset/counter_asset/fee_asset at write time in app.sync (see
+    # test_sync.py's test_sync_normalizes_kraken_asset_codes_to_canonical_symbols),
+    # so by the time a Transaction row reaches the DB its asset is already
+    # canonical. compute_portfolio() itself deliberately does no defensive
+    # re-normalization: app.sync is the only code path that writes
+    # Transaction rows (this is a fresh Phase-1 app with no pre-existing,
+    # un-normalized data to migrate), so relying solely on write-time
+    # normalization is sufficient and keeps compute_portfolio() simple. This
+    # test proves that's enough: two rows with the canonical asset "BTC" --
+    # one representing what the Bitcoin adapter would write, one
+    # representing what Kraken's "XBT" now normalizes to -- combine into a
+    # single portfolio entry.
+    db_session.add(
+        _tx(
+            external_id="onchain-1",
+            source_name="bitcoin",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("0.5"),
+        )
+    )
+    db_session.add(
+        _tx(
+            external_id="kraken-1",
+            source_name="kraken",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("0.3"),
+        )
+    )
+    db_session.commit()
+
+    portfolio = compute_portfolio(db_session)
+
+    assert len(portfolio) == 1
+    assert portfolio[0]["asset"] == "BTC"
+    assert portfolio[0]["amount"] == Decimal("0.8")
+
+
 def test_fee_value_chf_is_used_as_price_source_for_fee_asset(db_session):
     db_session.add(
         _tx(

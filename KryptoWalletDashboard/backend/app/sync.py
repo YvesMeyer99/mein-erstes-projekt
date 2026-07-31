@@ -2,6 +2,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.adapters.base import TransactionAdapter
+from app.assets import normalize_asset
 from app.models import SyncState, Transaction
 from app.prices.coingecko import get_or_fetch_price_chf
 
@@ -41,12 +42,21 @@ def sync_all(session: Session, adapters: list[TransactionAdapter], price_client)
                 if _already_persisted(session, adapter.source_name, adapter.account_label, ntx.external_id):
                     continue
 
-                price_chf = get_or_fetch_price_chf(session, price_client, ntx.asset, ntx.timestamp.date())
+                # Normalize once here -- the single choke point where every
+                # adapter's output is converted into a persisted Transaction
+                # -- so raw source-specific codes (Kraken's XBT/ETH2) never
+                # reach the DB, while raw_json below still preserves exactly
+                # what the source API returned.
+                asset = normalize_asset(ntx.asset)
+                counter_asset = normalize_asset(ntx.counter_asset) if ntx.counter_asset is not None else None
+                fee_asset = normalize_asset(ntx.fee_asset) if ntx.fee_asset is not None else None
+
+                price_chf = get_or_fetch_price_chf(session, price_client, asset, ntx.timestamp.date())
                 value_chf = price_chf * ntx.amount if price_chf is not None else None
 
                 fee_value_chf = None
-                if ntx.fee_amount is not None and ntx.fee_asset is not None:
-                    fee_price = get_or_fetch_price_chf(session, price_client, ntx.fee_asset, ntx.timestamp.date())
+                if ntx.fee_amount is not None and fee_asset is not None:
+                    fee_price = get_or_fetch_price_chf(session, price_client, fee_asset, ntx.timestamp.date())
                     fee_value_chf = fee_price * ntx.fee_amount if fee_price is not None else None
 
                 session.add(
@@ -56,14 +66,14 @@ def sync_all(session: Session, adapters: list[TransactionAdapter], price_client)
                         source_name=ntx.source_name,
                         account_label=ntx.account_label,
                         tx_type=ntx.tx_type,
-                        asset=ntx.asset,
+                        asset=asset,
                         amount=ntx.amount,
-                        counter_asset=ntx.counter_asset,
+                        counter_asset=counter_asset,
                         counter_amount=ntx.counter_amount,
                         price_chf=price_chf,
                         value_chf=value_chf,
                         fee_amount=ntx.fee_amount,
-                        fee_asset=ntx.fee_asset,
+                        fee_asset=fee_asset,
                         fee_value_chf=fee_value_chf,
                         external_id=ntx.external_id,
                         raw_json=ntx.raw_json,

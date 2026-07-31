@@ -6,13 +6,17 @@ import requests
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.assets import normalize_asset
 from app.models import PriceCache
 
+# Keyed by canonical symbol (see app.assets.normalize_asset). Source-specific
+# codes like Kraken's XBT/ETH2 are intentionally NOT duplicated here: they're
+# normalized to BTC/ETH before reaching this map, both at write time in
+# app.sync and defensively below via normalize_asset(), so a second entry
+# here would just be a second place for the two mappings to drift apart.
 COINGECKO_ID_MAP = {
     "BTC": "bitcoin",
-    "XBT": "bitcoin",
     "ETH": "ethereum",
-    "ETH2": "ethereum",
 }
 
 MAX_RETRIES = 3
@@ -22,7 +26,7 @@ class CoinGeckoPriceClient:
     BASE_URL = "https://api.coingecko.com/api/v3"
 
     def get_price_chf(self, asset: str, on_date: date) -> Decimal | None:
-        coingecko_id = COINGECKO_ID_MAP.get(asset.upper())
+        coingecko_id = COINGECKO_ID_MAP.get(normalize_asset(asset))
         if coingecko_id is None:
             return None
 

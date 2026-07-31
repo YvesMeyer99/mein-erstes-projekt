@@ -144,6 +144,56 @@ def test_sync_records_error_and_continues_with_other_adapters(db_session):
     assert failing_state.last_error == "API down"
 
 
+def test_sync_normalizes_kraken_asset_codes_to_canonical_symbols(db_session):
+    # Regression test for the on-chain-vs-Kraken asset collision: a Bitcoin
+    # adapter transaction (asset="BTC") and a Kraken ledger transaction
+    # (asset="XBT", Kraken's own code for Bitcoin) must both persist as the
+    # same canonical "BTC" symbol, or compute_portfolio() would (incorrectly)
+    # show them as two separate holdings for the same underlying asset.
+    adapter = FakeAdapter(
+        "main",
+        transactions=[
+            _tx("btc-onchain", asset="BTC"),
+            _tx("btc-kraken", asset="XBT"),
+        ],
+    )
+    reports = sync_all(db_session, [adapter], FakePriceClient(Decimal("100")))
+
+    assert reports[0]["status"] == "ok"
+    assert reports[0]["new_transactions"] == 2
+    saved = db_session.query(Transaction).order_by(Transaction.external_id).all()
+    assert {tx.asset for tx in saved} == {"BTC"}
+
+
+def test_sync_normalizes_counter_asset_and_fee_asset(db_session):
+    ntx = NormalizedTransaction(
+        timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
+        source_type="exchange",
+        source_name="kraken",
+        account_label="main",
+        tx_type="swap",
+        asset="XBT",
+        amount=Decimal("0.01"),
+        counter_asset="ETH2",
+        counter_amount=Decimal("0.2"),
+        fee_amount=Decimal("0.001"),
+        fee_asset="ETH2",
+        external_id="swap-1",
+        raw_json='{"asset": "XBT", "counter_asset": "ETH2", "fee_asset": "ETH2"}',
+    )
+    adapter = FakeAdapter("main", transactions=[ntx])
+    sync_all(db_session, [adapter], FakePriceClient(Decimal("100")))
+
+    saved = db_session.query(Transaction).one()
+    assert saved.asset == "BTC"
+    assert saved.counter_asset == "ETH"
+    assert saved.fee_asset == "ETH"
+    # The raw, un-normalized source values must still be recoverable from
+    # raw_json for auditability.
+    assert '"XBT"' in saved.raw_json
+    assert '"ETH2"' in saved.raw_json
+
+
 def test_sync_handles_missing_price_gracefully(db_session):
     class NonePriceClient:
         def get_price_chf(self, asset, on_date):
