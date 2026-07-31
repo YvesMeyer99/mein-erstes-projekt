@@ -365,3 +365,14 @@ def test_trades_are_not_filtered_by_since_full_history_always_refetched():
 
     trades = [r for r in results if r.tx_type == "swap"]
     assert len(trades) == 1
+
+
+@responses.activate
+def test_no_trades_for_configured_pair_returns_empty_without_error():
+    _mock_get("/sapi/v1/capital/deposit/hisrec", [])
+    _mock_get("/sapi/v1/capital/withdraw/history", [])
+    _mock_get("/api/v3/myTrades", [])
+
+    results = _adapter(trading_pairs=[BTC_USDT], sync_start=NOW - timedelta(days=1)).fetch_transactions(None)
+
+    assert [r for r in results if r.tx_type == "swap"] == []
