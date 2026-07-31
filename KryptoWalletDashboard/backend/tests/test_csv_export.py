@@ -141,3 +141,30 @@ def test_export_leaves_missing_price_fields_blank(db_session):
     rows = _rows(export_csv(db_session))
     assert rows[0]["Kurs CHF"] == ""
     assert rows[0]["Wert CHF"] == ""
+
+
+def test_export_neutralizes_formula_injection_in_asset_symbol(db_session):
+    # A malicious/airdropped ERC-20 token can set its symbol to an Excel
+    # formula (e.g. =HYPERLINK(...)). Etherscan passes that symbol through
+    # unfiltered, so it lands directly in Transaction.asset.
+    malicious = '=HYPERLINK("http://evil.example","x")'
+    db_session.add(_tx(asset=malicious))
+    db_session.commit()
+
+    rows = _rows(export_csv(db_session))
+    asset_cell = rows[0]["Asset"]
+
+    # The cell must no longer start with a formula-trigger character...
+    assert not asset_cell.startswith(("=", "+", "-", "@"))
+    # ...but must be neutralized via a leading single quote, not silently
+    # dropped or mangled - the original content is still fully recoverable.
+    assert asset_cell.startswith("'")
+    assert asset_cell[1:] == malicious
+
+
+def test_export_leaves_legitimate_asset_symbol_unaffected(db_session):
+    db_session.add(_tx(asset="USDC"))
+    db_session.commit()
+
+    rows = _rows(export_csv(db_session))
+    assert rows[0]["Asset"] == "USDC"

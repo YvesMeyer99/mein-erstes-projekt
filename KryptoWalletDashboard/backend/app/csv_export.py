@@ -24,6 +24,30 @@ COLUMNS = [
     "Referenz",
 ]
 
+# Leading characters that Excel/LibreOffice interpret as "this cell is a
+# formula". Untrusted data (e.g. an ERC-20 token symbol chosen by an
+# arbitrary contract deployer) can smuggle a formula like
+# =HYPERLINK("http://evil.example") into a CSV cell that later gets opened
+# in a spreadsheet. Prefixing such values with a single quote forces the
+# cell to be treated as plain text.
+_FORMULA_TRIGGER_CHARS = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _sanitize_cell(value: object) -> object:
+    """Neutralize CSV/spreadsheet formula injection in string cell values.
+
+    Only strings are inspected; non-string values (e.g. already-formatted
+    numeric strings are passed in as strings by the caller, but None etc.
+    pass through untouched) are returned unchanged.
+    """
+    if isinstance(value, str) and value.startswith(_FORMULA_TRIGGER_CHARS):
+        return "'" + value
+    return value
+
+
+def _sanitize_row(row: list) -> list:
+    return [_sanitize_cell(cell) for cell in row]
+
 
 def export_csv(
     session: Session,
@@ -51,21 +75,23 @@ def export_csv(
     writer.writerow(COLUMNS)
     for tx in rows:
         writer.writerow(
-            [
-                tx.timestamp.isoformat(),
-                tx.source_name,
-                tx.account_label,
-                tx.tx_type,
-                tx.asset,
-                format(tx.amount, "f"),
-                tx.counter_asset or "",
-                format(tx.counter_amount, "f") if tx.counter_amount is not None else "",
-                format(tx.price_chf, "f") if tx.price_chf is not None else "",
-                format(tx.value_chf, "f") if tx.value_chf is not None else "",
-                format(tx.fee_amount, "f") if tx.fee_amount is not None else "",
-                tx.fee_asset or "",
-                format(tx.fee_value_chf, "f") if tx.fee_value_chf is not None else "",
-                tx.external_id,
-            ]
+            _sanitize_row(
+                [
+                    tx.timestamp.isoformat(),
+                    tx.source_name,
+                    tx.account_label,
+                    tx.tx_type,
+                    tx.asset,
+                    format(tx.amount, "f"),
+                    tx.counter_asset or "",
+                    format(tx.counter_amount, "f") if tx.counter_amount is not None else "",
+                    format(tx.price_chf, "f") if tx.price_chf is not None else "",
+                    format(tx.value_chf, "f") if tx.value_chf is not None else "",
+                    format(tx.fee_amount, "f") if tx.fee_amount is not None else "",
+                    tx.fee_asset or "",
+                    format(tx.fee_value_chf, "f") if tx.fee_value_chf is not None else "",
+                    tx.external_id,
+                ]
+            )
         )
     return output.getvalue()
