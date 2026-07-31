@@ -8,6 +8,24 @@
    (Kraken-Key **muss** read-only sein - keine Trade-/Auszahlungsrechte!)
 4. Datenbank einmalig anlegen: `.venv/Scripts/python -m app.init_db`
 
+## Unterstützte EVM-Chains
+
+Seit Phase 2a werden neben Ethereum automatisch fünf weitere EVM-Chains
+für dieselbe(n) in `ETHEREUM_ADDRESSES` konfigurierte(n) Adresse(n)
+mitsynchronisiert - keine zusätzliche Konfiguration nötig:
+
+- Ethereum
+- Optimism
+- BNB Smart Chain (BSC)
+- Polygon
+- Base
+- Arbitrum One
+
+Alle sechs laufen über Etherscans vereinheitlichte Multi-Chain-API mit
+demselben `ETHERSCAN_API_KEY`. Sowohl native Coin-Transfers (ETH, BNB,
+MATIC, ...) als auch ERC-20-Token-Transfers (z.B. USDT, USDC) werden auf
+allen sechs Chains erfasst.
+
 ## Server starten
 
 ```bash
