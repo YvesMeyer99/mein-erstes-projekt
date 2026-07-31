@@ -5,6 +5,7 @@ from app.adapters.coinbase import CoinbaseAdapter
 from app.adapters.evm import EvmAdapter
 from app.adapters.evm_chains import EVM_CHAINS
 from app.adapters.kraken import KrakenAdapter
+from app.adapters.mexc import MexcAdapter
 
 
 def build_adapters_from_config() -> list[TransactionAdapter]:
@@ -37,6 +38,15 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
                 account_label="coinbase-main",
                 api_key_name=config.COINBASE_API_KEY_NAME,
                 private_key_pem=config.COINBASE_API_PRIVATE_KEY,
+            )
+        )
+    if config.MEXC_API_KEY and config.MEXC_API_SECRET:
+        adapters.append(
+            MexcAdapter(
+                account_label="mexc-main",
+                api_key=config.MEXC_API_KEY,
+                api_secret=config.MEXC_API_SECRET,
+                trading_pairs=config.MEXC_TRADING_PAIRS,
             )
         )
     return adapters

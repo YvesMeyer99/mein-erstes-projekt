@@ -37,3 +37,36 @@ def test_normalize_pem_env_value_returns_empty_string_for_none():
     from app.config import normalize_pem_env_value
 
     assert normalize_pem_env_value(None) == ""
+
+
+def test_parse_trading_pairs_returns_empty_list_for_none():
+    from app.config import parse_trading_pairs
+
+    assert parse_trading_pairs(None) == []
+
+
+def test_parse_trading_pairs_parses_single_entry():
+    from app.config import TradingPairConfig, parse_trading_pairs
+
+    result = parse_trading_pairs("BTCUSDT:BTC:USDT")
+
+    assert result == [TradingPairConfig(symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT")]
+
+
+def test_parse_trading_pairs_parses_multiple_entries_and_trims_whitespace():
+    from app.config import TradingPairConfig, parse_trading_pairs
+
+    result = parse_trading_pairs(" BTCUSDT : BTC : USDT , ETHUSDT:ETH:USDT ")
+
+    assert result == [
+        TradingPairConfig(symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT"),
+        TradingPairConfig(symbol="ETHUSDT", base_asset="ETH", quote_asset="USDT"),
+    ]
+
+
+def test_parse_trading_pairs_skips_malformed_entries():
+    from app.config import parse_trading_pairs
+
+    result = parse_trading_pairs("BTCUSDT:BTC,ETHUSDT:ETH:USDT")
+
+    assert [p.symbol for p in result] == ["ETHUSDT"]

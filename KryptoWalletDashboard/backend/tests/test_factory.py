@@ -90,3 +90,45 @@ def test_coinbase_adapter_is_not_added_when_only_partially_configured(monkeypatc
     adapters = build_adapters_from_config()
 
     assert not any(isinstance(a, CoinbaseAdapter) for a in adapters)
+
+
+def test_mexc_adapter_is_added_when_configured(monkeypatch):
+    from app.adapters.mexc import MexcAdapter
+    from app.config import TradingPairConfig
+
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "key")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "secret")
+    monkeypatch.setattr(
+        config, "MEXC_TRADING_PAIRS", [TradingPairConfig(symbol="BTCUSDT", base_asset="BTC", quote_asset="USDT")]
+    )
+
+    adapters = build_adapters_from_config()
+
+    mexc_adapters = [a for a in adapters if isinstance(a, MexcAdapter)]
+    assert len(mexc_adapters) == 1
+    assert mexc_adapters[0].account_label == "mexc-main"
+    assert mexc_adapters[0].trading_pairs[0].symbol == "BTCUSDT"
+
+
+def test_mexc_adapter_is_not_added_when_only_partially_configured(monkeypatch):
+    from app.adapters.mexc import MexcAdapter
+
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "key")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "MEXC_TRADING_PAIRS", [])
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, MexcAdapter) for a in adapters)

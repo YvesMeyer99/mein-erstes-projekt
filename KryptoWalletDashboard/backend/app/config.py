@@ -32,6 +32,20 @@ def parse_wallets(env_value: str | None) -> list[WalletConfig]:
     return wallets
 
 
+def parse_trading_pairs(env_value: str | None) -> list[TradingPairConfig]:
+    if not env_value:
+        return []
+    pairs = []
+    for entry in env_value.split(","):
+        parts = entry.split(":")
+        if len(parts) != 3:
+            continue
+        symbol, base_asset, quote_asset = (p.strip() for p in parts)
+        if symbol and base_asset and quote_asset:
+            pairs.append(TradingPairConfig(symbol=symbol, base_asset=base_asset, quote_asset=quote_asset))
+    return pairs
+
+
 def normalize_pem_env_value(env_value: str | None) -> str:
     """PEM private keys are multi-line; when stored in a .env file they're
     typically written with literal backslash-n sequences instead of real
@@ -49,4 +63,7 @@ KRAKEN_API_KEY = os.getenv("KRAKEN_API_KEY", "")
 KRAKEN_API_SECRET = os.getenv("KRAKEN_API_SECRET", "")
 COINBASE_API_KEY_NAME = os.getenv("COINBASE_API_KEY_NAME", "")
 COINBASE_API_PRIVATE_KEY = normalize_pem_env_value(os.getenv("COINBASE_API_PRIVATE_KEY"))
+MEXC_API_KEY = os.getenv("MEXC_API_KEY", "")
+MEXC_API_SECRET = os.getenv("MEXC_API_SECRET", "")
+MEXC_TRADING_PAIRS = parse_trading_pairs(os.getenv("MEXC_TRADING_PAIRS"))
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./krypto_dashboard.db")
