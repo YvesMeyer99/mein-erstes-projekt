@@ -1,4 +1,5 @@
 import json
+import time
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -11,6 +12,9 @@ from app.schemas import NormalizedTransaction
 API_URL = "https://api.mexc.com"
 PAGE_LIMIT = 1000
 
+MAX_RETRIES = 3
+
+# MEXC's two documented "deposit completed" status codes: 5 = SUCCESS, 12 = COMPLETED.
 DEPOSIT_SUCCESS_STATUSES = {"5", "12"}
 WITHDRAWAL_SUCCESS_STATUS = "7"
 
@@ -26,13 +30,20 @@ class MexcAdapter(TransactionAdapter):
         self.trading_pairs = trading_pairs
 
     def _get(self, path: str, params: dict) -> list:
-        signed_params = build_signed_params(params, self.api_secret)
-        response = requests.get(
-            f"{API_URL}{path}",
-            params=signed_params,
-            headers={"X-MEXC-APIKEY": self.api_key},
-            timeout=10,
-        )
+        response = None
+        for attempt in range(MAX_RETRIES):
+            signed_params = build_signed_params(params, self.api_secret)
+            response = requests.get(
+                f"{API_URL}{path}",
+                params=signed_params,
+                headers={"X-MEXC-APIKEY": self.api_key},
+                timeout=10,
+            )
+            if response.status_code != 429:
+                break
+            if attempt < MAX_RETRIES - 1:
+                time.sleep(2**attempt)
+
         response.raise_for_status()
         return response.json()
 
@@ -53,6 +64,11 @@ class MexcAdapter(TransactionAdapter):
             all_records.extend(batch)
             if len(batch) < PAGE_LIMIT:
                 break
+            # Advance past the latest timestamp seen so far to avoid re-fetching the
+            # same page forever. Tradeoff: if a full PAGE_LIMIT page shares one exact
+            # millisecond timestamp, records beyond it at that same timestamp would be
+            # skipped -- accepted as deposit/withdrawal volume never reaches that
+            # density in practice.
             start_time_ms = max(int(r[time_field]) for r in batch) + 1
         return all_records
 

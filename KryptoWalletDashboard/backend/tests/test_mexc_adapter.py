@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from unittest.mock import patch
 
 import responses
 
@@ -146,3 +147,23 @@ def test_paginates_deposits_until_short_page():
         if c.request.url.split("?")[0] == f"{API_BASE}/api/v3/capital/deposit/hisrec"
     ]
     assert len(deposit_calls) == 2
+
+
+@responses.activate
+@patch("app.adapters.mexc.time.sleep")
+def test_retries_on_429_then_succeeds(mock_sleep):
+    responses.add(responses.GET, f"{API_BASE}/api/v3/capital/deposit/hisrec", status=429)
+    responses.add(responses.GET, f"{API_BASE}/api/v3/capital/deposit/hisrec", status=429)
+    _mock_get("/api/v3/capital/deposit/hisrec", [_deposit("tx1", "BTC", "0.5", "5", 1700000000000)])
+    _mock_get("/api/v3/capital/withdraw/history", [])
+
+    results = _adapter().fetch_transactions(None)
+
+    assert len(results) == 1
+    assert results[0].external_id == "deposit-tx1"
+    deposit_calls = [
+        c for c in responses.calls
+        if c.request.url.split("?")[0] == f"{API_BASE}/api/v3/capital/deposit/hisrec"
+    ]
+    assert len(deposit_calls) == 3
+    assert mock_sleep.call_count == 2
