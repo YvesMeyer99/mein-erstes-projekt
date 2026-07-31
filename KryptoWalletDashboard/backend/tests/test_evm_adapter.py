@@ -230,7 +230,7 @@ def test_incoming_token_transfer_is_transfer_in():
     assert result.asset == "USDC"
     assert result.amount == Decimal("5")
     assert result.fee_amount is None
-    assert result.external_id == "0xtoken-in-token-0xusdccontract"
+    assert result.external_id == "0xtoken-in-token-0xusdccontract-0"
 
 
 @responses.activate
@@ -270,7 +270,7 @@ def test_token_transfer_since_filter_is_applied():
     since = datetime.fromtimestamp(1700000500, tz=timezone.utc)
     results = adapter.fetch_transactions(since)
 
-    assert [r.external_id for r in results] == ["0xnew-token-0xc"]
+    assert [r.external_id for r in results] == ["0xnew-token-0xc-0"]
 
 
 @responses.activate
@@ -287,3 +287,26 @@ def test_native_and_token_transfers_are_both_returned_together():
 
     assets = {r.asset for r in results}
     assert assets == {"ETH", "USDC"}
+
+
+@responses.activate
+def test_multiple_transfer_logs_same_hash_and_contract_get_distinct_external_ids():
+    """A single tx (e.g. a router forwarding tokens through an intermediate
+    hop) can emit two separate Transfer log entries for the same
+    (hash, contractAddress) pair. Both must survive as distinct results,
+    not collide into a single external_id and get deduped away."""
+    native_page = {"status": "0", "message": "No transactions found", "result": []}
+    leg_one = _token_tx("0xrouter", 1700000000, "0xSomeoneElse", ADDRESS, 1_000_000, "USDC", 6, "0xc")
+    leg_two = _token_tx("0xrouter", 1700000000, "0xSomeoneElse", ADDRESS, 2_000_000, "USDC", 6, "0xc")
+    token_page = {"status": "1", "message": "OK", "result": [leg_one, leg_two]}
+    responses.add(responses.GET, API_URL, json=native_page, status=200)
+    responses.add(responses.GET, API_URL, json=token_page, status=200)
+
+    adapter = _ethereum_adapter()
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 2
+    external_ids = [r.external_id for r in results]
+    assert external_ids == ["0xrouter-token-0xc-0", "0xrouter-token-0xc-1"]
+    assert len(set(external_ids)) == 2
+    assert {r.amount for r in results} == {Decimal("1"), Decimal("2")}

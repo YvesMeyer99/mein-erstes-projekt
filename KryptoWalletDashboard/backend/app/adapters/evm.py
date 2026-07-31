@@ -11,10 +11,10 @@ WEI_PER_NATIVE_UNIT = Decimal(10**18)
 
 
 class EvmAdapter(TransactionAdapter):
-    """Fetches native-coin transfers for one EVM-compatible chain via
-    Etherscan's V2 multi-chain API. One instance = one (wallet, chain) pair;
-    the same `api_key` works across every chain Etherscan V2 supports, only
-    `chain_id` changes."""
+    """Fetches native-coin transfers and ERC-20 token transfers for one
+    EVM-compatible chain via Etherscan's V2 multi-chain API. One instance =
+    one (wallet, chain) pair; the same `api_key` works across every chain
+    Etherscan V2 supports, only `chain_id` changes."""
 
     source_type = "chain"
     API_URL = "https://api.etherscan.io/v2/api"
@@ -80,8 +80,20 @@ class EvmAdapter(TransactionAdapter):
 
     def _token_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
         address_lower = self.address.lower()
+        occurrence_counts: dict[tuple[str, str], int] = {}
         results: list[NormalizedTransaction] = []
         for tx in self._fetch_all_pages("tokentx"):
+            # A single on-chain transaction can emit multiple Transfer log
+            # entries for the same (hash, contractAddress) pair (e.g. a
+            # router forwarding tokens through an intermediate hop). Track
+            # an occurrence index per pair, over every row Etherscan
+            # returns (before since/amount filtering), so external_id stays
+            # unique per log entry and stable across repeated syncs -
+            # results come back in stable chronological order (sort=asc).
+            key = (tx["hash"], tx["contractAddress"])
+            occurrence = occurrence_counts.get(key, 0)
+            occurrence_counts[key] = occurrence + 1
+
             timestamp = datetime.fromtimestamp(int(tx["timeStamp"]), tz=timezone.utc)
             if since is not None and timestamp <= since:
                 continue
@@ -108,7 +120,7 @@ class EvmAdapter(TransactionAdapter):
                     amount=amount,
                     fee_amount=fee_amount,
                     fee_asset=fee_asset,
-                    external_id=f"{tx['hash']}-token-{tx['contractAddress']}",
+                    external_id=f"{tx['hash']}-token-{tx['contractAddress']}-{occurrence}",
                     raw_json=json.dumps(tx),
                 )
             )
