@@ -40,12 +40,6 @@ function Transactions() {
     setFilters((prev) => ({ ...prev, [key]: value || undefined }));
   }
 
-  // Capitalized so a dropdown option's visible label never collides (in text-based
-  // queries) with the raw lowercase value shown verbatim in the table cells below.
-  function optionLabel(value: string): string {
-    return value.charAt(0).toUpperCase() + value.slice(1);
-  }
-
   if (error) {
     return (
       <div className="text-red-600">
@@ -91,7 +85,7 @@ function Transactions() {
           <option value="">Alle Quellen</option>
           {sourceOptions.map((source) => (
             <option key={source} value={source}>
-              {optionLabel(source)}
+              {source}
             </option>
           ))}
         </select>
@@ -103,7 +97,7 @@ function Transactions() {
           <option value="">Alle Typen</option>
           {txTypeOptions.map((type) => (
             <option key={type} value={type}>
-              {optionLabel(type)}
+              {type}
             </option>
           ))}
         </select>
@@ -115,7 +109,7 @@ function Transactions() {
           <option value="">Alle Konten</option>
           {accountOptions.map((account) => (
             <option key={account} value={account}>
-              {optionLabel(account)}
+              {account}
             </option>
           ))}
         </select>

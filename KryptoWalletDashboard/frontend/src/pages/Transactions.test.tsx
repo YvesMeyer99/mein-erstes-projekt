@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as client from "../api/client";
 import type { Transaction } from "../api/types";
@@ -67,15 +67,17 @@ describe("Transactions", () => {
 
     render(<Transactions />);
 
-    expect(await screen.findByText("binance")).toBeInTheDocument();
-    expect(screen.getByText("bitcoin")).toBeInTheDocument();
+    const table = await screen.findByRole("table");
+    expect(within(table).getByText("binance")).toBeInTheDocument();
+    expect(within(table).getByText("bitcoin")).toBeInTheDocument();
   });
 
   it("populates the source dropdown from the unfiltered transaction set", async () => {
     vi.spyOn(client, "fetchTransactions").mockResolvedValue(SAMPLE);
 
     render(<Transactions />);
-    await screen.findByText("binance");
+    const table = await screen.findByRole("table");
+    within(table).getByText("binance");
 
     const sourceSelect = screen.getByLabelText("Quelle") as HTMLSelectElement;
     const optionValues = Array.from(sourceSelect.options).map((o) => o.value);
@@ -86,7 +88,8 @@ describe("Transactions", () => {
     const spy = vi.spyOn(client, "fetchTransactions").mockResolvedValue(SAMPLE);
 
     render(<Transactions />);
-    await screen.findByText("binance");
+    const table = await screen.findByRole("table");
+    within(table).getByText("binance");
     spy.mockClear();
 
     fireEvent.change(screen.getByLabelText("Quelle"), { target: { value: "binance" } });
@@ -98,7 +101,8 @@ describe("Transactions", () => {
     vi.spyOn(client, "fetchTransactions").mockResolvedValue(SAMPLE);
 
     render(<Transactions />);
-    await screen.findByText("binance");
+    const table = await screen.findByRole("table");
+    within(table).getByText("binance");
 
     fireEvent.change(screen.getByLabelText("Quelle"), { target: { value: "binance" } });
 
