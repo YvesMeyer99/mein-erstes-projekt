@@ -111,3 +111,23 @@ def test_latest_price_is_chosen_by_timestamp_not_insertion_order(db_session):
 
     portfolio = {row["asset"]: row for row in compute_portfolio(db_session)}
     assert portfolio["BTC"]["price_chf"] == Decimal("200")
+
+
+def test_fee_value_chf_is_used_as_price_source_for_fee_asset(db_session):
+    db_session.add(
+        _tx(
+            external_id="1",
+            tx_type="transfer_out",
+            asset="BTC",
+            amount=Decimal("1"),
+            price_chf=None,
+            value_chf=None,
+            fee_amount=Decimal("0.001"),
+            fee_asset="ETH",
+            fee_value_chf=Decimal("2.5"),
+        )
+    )
+    db_session.commit()
+
+    portfolio = {row["asset"]: row for row in compute_portfolio(db_session)}
+    assert portfolio["ETH"]["price_chf"] == Decimal("2.5") / Decimal("0.001")

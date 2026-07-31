@@ -34,6 +34,13 @@ def compute_portfolio(session: Session) -> list[dict]:
         if tx.value_chf is not None and tx.amount != 0:
             latest_price_per_unit[tx.asset] = tx.value_chf / tx.amount
 
+        if tx.fee_value_chf is not None and tx.fee_amount and tx.fee_asset:
+            latest_price_per_unit[tx.fee_asset] = tx.fee_value_chf / tx.fee_amount
+
+    # A negative balance for an asset is expected/valid output here: it means
+    # more of that asset was spent (e.g. on fees) than was ever recorded as
+    # received, which usually signals an incomplete sync history for that
+    # asset rather than a bug in this calculation.
     portfolio = []
     for asset, amount in balances.items():
         if amount == 0:
