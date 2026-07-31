@@ -12,6 +12,13 @@ class WalletConfig:
     address: str
 
 
+@dataclass(frozen=True)
+class TradingPairConfig:
+    symbol: str
+    base_asset: str
+    quote_asset: str
+
+
 def parse_wallets(env_value: str | None) -> list[WalletConfig]:
     if not env_value:
         return []
