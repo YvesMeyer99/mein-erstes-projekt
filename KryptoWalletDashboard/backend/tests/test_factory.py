@@ -1,0 +1,29 @@
+import os
+
+import pytest
+
+from app import config
+from app.adapters.evm import EvmAdapter
+from app.adapters.evm_chains import EVM_CHAINS
+from app.adapters.factory import build_adapters_from_config
+
+
+@pytest.fixture()
+def one_wallet_config(monkeypatch):
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(
+        config, "ETHEREUM_WALLETS", [config.WalletConfig(label="main", address="0xabc")]
+    )
+    monkeypatch.setattr(config, "ETHERSCAN_API_KEY", "key")
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+
+
+def test_one_ethereum_wallet_produces_one_evm_adapter_per_chain(one_wallet_config):
+    adapters = build_adapters_from_config()
+
+    evm_adapters = [a for a in adapters if isinstance(a, EvmAdapter)]
+    assert len(evm_adapters) == len(EVM_CHAINS)
+    assert {a.source_name for a in evm_adapters} == {c.chain_name for c in EVM_CHAINS}
+    assert all(a.account_label == "main" for a in evm_adapters)
+    assert all(a.address == "0xabc" for a in evm_adapters)
