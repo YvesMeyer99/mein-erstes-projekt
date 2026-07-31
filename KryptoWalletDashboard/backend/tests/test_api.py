@@ -86,6 +86,135 @@ def test_transactions_endpoint_filters_by_source_name(db_session):
     app.dependency_overrides.clear()
 
 
+def test_transactions_endpoint_accepts_naive_bare_date_start(db_session):
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2023, 12, 31, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="main",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="before",
+            raw_json="{}",
+        )
+    )
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="main",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="after",
+            raw_json="{}",
+        )
+    )
+    db_session.commit()
+
+    client = _client(db_session)
+    response = client.get("/api/transactions", params={"start": "2024-01-01"})
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["external_id"] == "after"
+    app.dependency_overrides.clear()
+
+
+def test_export_endpoint_accepts_naive_bare_date_start(db_session):
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2023, 12, 31, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="main",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="before",
+            raw_json="{}",
+        )
+    )
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="main",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="after",
+            raw_json="{}",
+        )
+    )
+    db_session.commit()
+
+    client = _client(db_session)
+    response = client.get("/api/export", params={"start": "2024-01-01"})
+    assert response.status_code == 200
+    assert "after" in response.text
+    assert "before" not in response.text
+    app.dependency_overrides.clear()
+
+
+def test_transactions_endpoint_accepts_mixed_naive_start_and_aware_end(db_session):
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2023, 12, 31, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="main",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="before",
+            raw_json="{}",
+        )
+    )
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 1, 2, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="main",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="in_range",
+            raw_json="{}",
+        )
+    )
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 2, 1, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="main",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="after",
+            raw_json="{}",
+        )
+    )
+    db_session.commit()
+
+    client = _client(db_session)
+    response = client.get(
+        "/api/transactions",
+        params={"start": "2024-01-01", "end": "2024-01-31T00:00:00+00:00"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    assert body[0]["external_id"] == "in_range"
+    app.dependency_overrides.clear()
+
+
 def test_portfolio_endpoint_reflects_transactions(db_session):
     db_session.add(
         Transaction(

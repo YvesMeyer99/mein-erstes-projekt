@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Response
 from sqlalchemy import select
@@ -43,6 +43,17 @@ def api_portfolio(session: Session = Depends(get_session)):
     return compute_portfolio(session)
 
 
+def _as_utc(dt: datetime | None) -> datetime | None:
+    """Treat a naive datetime (e.g. parsed from a bare-date query param like
+    ``?start=2024-01-01``) as UTC. The UTCDateTime column type rejects naive
+    datetimes outright, so any user-supplied filter value must be made
+    timezone-aware before it reaches a query.
+    """
+    if dt is not None and dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
 def _apply_filters(query, start, end, source_name, tx_type, account_label):
     if start is not None:
         query = query.where(Transaction.timestamp >= start)
@@ -68,7 +79,7 @@ def api_transactions(
 ):
     query = _apply_filters(
         select(Transaction).order_by(Transaction.timestamp.desc()),
-        start, end, source_name, tx_type, account_label,
+        _as_utc(start), _as_utc(end), source_name, tx_type, account_label,
     )
     return session.execute(query).scalars().all()
 
@@ -82,7 +93,7 @@ def api_export(
     account_label: str | None = None,
     session: Session = Depends(get_session),
 ):
-    csv_content = export_csv(session, start, end, source_name, tx_type, account_label)
+    csv_content = export_csv(session, _as_utc(start), _as_utc(end), source_name, tx_type, account_label)
     return Response(
         content=csv_content,
         media_type="text/csv",
