@@ -130,3 +130,33 @@ def test_get_or_fetch_price_chf_returns_none_and_does_not_cache_on_missing_price
 
     assert result is None
     assert db_session.query(PriceCache).count() == 0
+
+
+@responses.activate
+def test_client_resolves_bnb_price():
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/coins/binancecoin/history",
+        json={"market_data": {"current_price": {"chf": "300.0"}}},
+        status=200,
+    )
+
+    client = CoinGeckoPriceClient()
+    price = client.get_price_chf("BNB", date(2024, 1, 15))
+
+    assert price == Decimal("300.0")
+
+
+@responses.activate
+def test_client_resolves_matic_price():
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/coins/matic-network/history",
+        json={"market_data": {"current_price": {"chf": "0.75"}}},
+        status=200,
+    )
+
+    client = CoinGeckoPriceClient()
+    price = client.get_price_chf("MATIC", date(2024, 1, 15))
+
+    assert price == Decimal("0.75")

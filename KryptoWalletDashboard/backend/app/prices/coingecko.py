@@ -17,6 +17,8 @@ from app.models import PriceCache
 COINGECKO_ID_MAP = {
     "BTC": "bitcoin",
     "ETH": "ethereum",
+    "BNB": "binancecoin",
+    "MATIC": "matic-network",
 }
 
 MAX_RETRIES = 3
