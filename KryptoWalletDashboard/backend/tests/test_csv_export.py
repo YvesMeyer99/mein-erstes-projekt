@@ -30,13 +30,14 @@ def _rows(csv_text: str) -> list[dict]:
 
 
 def test_export_includes_header_and_all_columns(db_session):
-    db_session.add(_tx())
+    db_session.add(_tx(fee_amount=Decimal("0.0001"), fee_asset="BTC"))
     db_session.commit()
 
     rows = _rows(export_csv(db_session))
 
     assert len(rows) == 1
     row = rows[0]
+    assert row["Datum"] == "2024-01-15T00:00:00"
     assert row["Chain/Boerse"] == "bitcoin"
     assert row["Wallet"] == "main"
     assert row["Typ"] == "transfer_in"
@@ -44,7 +45,26 @@ def test_export_includes_header_and_all_columns(db_session):
     assert row["Menge"] == "1"
     assert row["Kurs CHF"] == "50000"
     assert row["Wert CHF"] == "50000"
+    assert row["Gebuehr"] == "0.0001"
+    assert row["Gebuehr Asset"] == "BTC"
     assert row["Referenz"] == "id1"
+
+
+def test_export_leaves_missing_fee_fields_blank(db_session):
+    db_session.add(_tx(fee_amount=None, fee_asset=None))
+    db_session.commit()
+
+    rows = _rows(export_csv(db_session))
+    assert rows[0]["Gebuehr"] == ""
+    assert rows[0]["Gebuehr Asset"] == ""
+
+
+def test_export_formats_small_amounts_without_scientific_notation(db_session):
+    db_session.add(_tx(amount=Decimal("0.00000001")))
+    db_session.commit()
+
+    rows = _rows(export_csv(db_session))
+    assert rows[0]["Menge"] == "0.00000001"
 
 
 def test_export_filters_by_date_range(db_session):
