@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 
 from fastapi import Depends, FastAPI, Response
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -14,6 +15,13 @@ from app.schemas import PortfolioEntryOut, TransactionOut
 from app.sync import sync_all
 
 app = FastAPI(title="Krypto-Wallet-Dashboard")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["*"],
+)
 
 
 def get_session():
