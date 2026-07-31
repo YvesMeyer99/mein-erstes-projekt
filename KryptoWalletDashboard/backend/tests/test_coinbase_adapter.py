@@ -252,6 +252,37 @@ def test_iterates_transactions_across_multiple_accounts(monkeypatch):
 
 
 @responses.activate
+def test_fiat_accounts_are_skipped_without_fetching_their_transactions(monkeypatch):
+    monkeypatch.setattr(
+        "app.adapters.coinbase.build_coinbase_jwt", lambda *a, **k: "fake-jwt"
+    )
+    _mock_accounts([_account("acc-btc", "BTC"), _account("acc-eur", "EUR")])
+    _mock_transactions(
+        "acc-btc",
+        [_tx("tx-btc", "buy", "0.1", "BTC", "2024-01-15T10:00:00Z")],
+    )
+    # A transaction is registered for the EUR account's transactions endpoint
+    # too, but the assertions below prove that endpoint is never called at
+    # all -- the fiat account must be skipped at the account-iteration level
+    # in fetch_transactions, before any HTTP request for its transactions is
+    # made, not merely filtered out of the results afterward.
+    _mock_transactions(
+        "acc-eur",
+        [_tx("tx-eur", "buy", "-50.00", "EUR", "2024-01-15T10:00:00Z")],
+    )
+
+    results = _adapter().fetch_transactions(None)
+
+    assert [r.external_id for r in results] == ["tx-btc"]
+    eur_tx_calls = [
+        c
+        for c in responses.calls
+        if c.request.url.split("?")[0] == f"{API_BASE}/v2/accounts/acc-eur/transactions"
+    ]
+    assert len(eur_tx_calls) == 0
+
+
+@responses.activate
 def test_paginates_accounts_and_transactions_until_short_page(monkeypatch):
     monkeypatch.setattr(
         "app.adapters.coinbase.build_coinbase_jwt", lambda *a, **k: "fake-jwt"

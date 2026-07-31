@@ -34,6 +34,18 @@ MAX_RETRIES = 3
 # transaction is a harmless no-op in sync.py (dedup by external_id).
 SYNC_LOOKBACK = timedelta(days=7)
 
+# Fiat-currency Coinbase accounts are skipped entirely. When a crypto buy/sell
+# is funded from (or settles into) a held fiat balance rather than a fresh
+# bank/card charge, Coinbase can emit a second transaction row on the fiat
+# account itself for the same underlying trade, with sign semantics that are
+# ambiguous relative to portfolio.py's inflow/outflow model for "buy"/"sell"
+# (a "buy" row on the fiat leg represents money leaving, not arriving, and
+# vice-versa for "sell") -- normalizing it the same way as the crypto-side
+# row would silently corrupt the fiat balance. Since fiat balances aren't
+# relevant to crypto capital-gains tracking anyway, the safe, conservative
+# fix is to never fetch or normalize fiat account transactions at all.
+FIAT_CURRENCIES = {"USD", "EUR", "CHF", "GBP", "JPY", "CAD", "AUD"}
+
 
 class CoinbaseAdapter(TransactionAdapter):
     source_type = "exchange"
@@ -81,6 +93,8 @@ class CoinbaseAdapter(TransactionAdapter):
     def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
         results: list[NormalizedTransaction] = []
         for account in self._paginated("/v2/accounts"):
+            if account.get("currency") in FIAT_CURRENCIES:
+                continue
             for tx in self._paginated(f"/v2/accounts/{account['id']}/transactions"):
                 normalized = self._normalize(tx, since)
                 if normalized is not None:
