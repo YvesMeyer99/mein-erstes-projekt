@@ -90,6 +90,15 @@ class BinanceAdapter(TransactionAdapter):
         if since is not None:
             effective_since = since - SYNC_LOOKBACK
         else:
+            # Unlike MEXC (which has no forced start point and so skips
+            # since-filtering entirely on the first sync), Binance always
+            # needs a concrete effective_since here (sync_start or the
+            # 5-year fallback) to bound the very first windowed query. That
+            # concrete value is then used as an *exclusive* lower bound
+            # below (timestamp <= effective_since is skipped), so a record
+            # dated exactly at sync_start is deliberately excluded rather
+            # than an oversight - callers who need that exact instant
+            # included should configure sync_start one moment earlier.
             effective_since = self.sync_start or (now - DEFAULT_SYNC_START_LOOKBACK)
 
         results: list[NormalizedTransaction] = []
@@ -152,7 +161,8 @@ class BinanceAdapter(TransactionAdapter):
             if timestamp <= effective_since:
                 continue
             fee_raw = record.get("transactionFee")
-            fee_amount = Decimal(str(fee_raw)) if fee_raw and Decimal(str(fee_raw)) != 0 else None
+            parsed_fee = Decimal(str(fee_raw)) if fee_raw else None
+            fee_amount = parsed_fee if parsed_fee else None
             results.append(
                 NormalizedTransaction(
                     timestamp=timestamp,
