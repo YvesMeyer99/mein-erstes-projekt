@@ -335,3 +335,46 @@ def test_paginates_trades_until_short_page():
     assert len(trades) == 1001
     trade_calls = [c for c in responses.calls if "/api/v3/myTrades" in c.request.url]
     assert len(trade_calls) == 2
+
+
+@responses.activate
+def test_warns_when_sync_gap_exceeds_30_day_trade_history_window(caplog):
+    _mock_get("/api/v3/capital/deposit/hisrec", [])
+    _mock_get("/api/v3/capital/withdraw/history", [])
+    _mock_get("/api/v3/myTrades", [])
+
+    since = datetime.now(timezone.utc) - timedelta(days=31)
+
+    with caplog.at_level("WARNING", logger="app.adapters.mexc"):
+        _adapter(trading_pairs=[BTC_USDT]).fetch_transactions(since)
+
+    assert any(
+        "BTCUSDT" in record.message and "30 Tage" in record.message
+        for record in caplog.records
+    )
+
+
+@responses.activate
+def test_no_warning_when_sync_gap_is_within_30_days(caplog):
+    _mock_get("/api/v3/capital/deposit/hisrec", [])
+    _mock_get("/api/v3/capital/withdraw/history", [])
+    _mock_get("/api/v3/myTrades", [])
+
+    since = datetime.now(timezone.utc) - timedelta(days=5)
+
+    with caplog.at_level("WARNING", logger="app.adapters.mexc"):
+        _adapter(trading_pairs=[BTC_USDT]).fetch_transactions(since)
+
+    assert caplog.records == []
+
+
+@responses.activate
+def test_no_warning_when_since_is_none(caplog):
+    _mock_get("/api/v3/capital/deposit/hisrec", [])
+    _mock_get("/api/v3/capital/withdraw/history", [])
+    _mock_get("/api/v3/myTrades", [])
+
+    with caplog.at_level("WARNING", logger="app.adapters.mexc"):
+        _adapter(trading_pairs=[BTC_USDT]).fetch_transactions(None)
+
+    assert caplog.records == []

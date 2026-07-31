@@ -1,4 +1,5 @@
 import json
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -10,10 +11,21 @@ from app.adapters.mexc_auth import build_signed_params
 from app.config import TradingPairConfig
 from app.schemas import NormalizedTransaction
 
+logger = logging.getLogger(__name__)
+
 API_URL = "https://api.mexc.com"
 PAGE_LIMIT = 1000
 
 MAX_RETRIES = 3
+
+# MEXC's myTrades endpoint silently ignores `startTime` beyond this window
+# and only ever returns the last 30 days of trades, regardless of what's
+# requested. If more than 30 days have passed since the last sync, any
+# trades older than 30 days ago but newer than the previous watermark are
+# permanently unfetchable via the API -- not something SYNC_LOOKBACK above
+# can fix, since that's a client concern and this is a hard server-side
+# limit. We can't recover the data, but we can at least warn.
+TRADE_HISTORY_WINDOW = timedelta(days=30)
 
 # MEXC's two documented "deposit completed" status codes: 5 = SUCCESS, 12 = COMPLETED.
 DEPOSIT_SUCCESS_STATUSES = {"5", "12"}
@@ -84,7 +96,11 @@ class MexcAdapter(TransactionAdapter):
         effective_since = since - SYNC_LOOKBACK if since is not None else None
         results.extend(self._fetch_deposits(effective_since))
         results.extend(self._fetch_withdrawals(effective_since))
-        results.extend(self._fetch_trades(effective_since))
+        # Trades additionally need the original, un-widened `since` to detect
+        # a >30-day sync gap against MEXC's hard trade-history limit (see
+        # TRADE_HISTORY_WINDOW above) -- SYNC_LOOKBACK would mask exactly the
+        # gap size we're trying to detect here.
+        results.extend(self._fetch_trades(effective_since, since))
         return results
 
     def _fetch_all_records(
@@ -168,15 +184,27 @@ class MexcAdapter(TransactionAdapter):
             )
         return results
 
-    def _fetch_trades(self, since: datetime | None) -> list[NormalizedTransaction]:
+    def _fetch_trades(
+        self, since: datetime | None, original_since: datetime | None = None
+    ) -> list[NormalizedTransaction]:
         results: list[NormalizedTransaction] = []
         for pair in self.trading_pairs:
-            results.extend(self._fetch_trades_for_pair(pair, since))
+            results.extend(self._fetch_trades_for_pair(pair, since, original_since))
         return results
 
     def _fetch_trades_for_pair(
-        self, pair: TradingPairConfig, since: datetime | None
+        self,
+        pair: TradingPairConfig,
+        since: datetime | None,
+        original_since: datetime | None = None,
     ) -> list[NormalizedTransaction]:
+        if original_since is not None and datetime.now(timezone.utc) - original_since > TRADE_HISTORY_WINDOW:
+            logger.warning(
+                "MEXC-Trades für %s: seit letztem Sync sind mehr als 30 Tage vergangen, "
+                "ältere Trades sind über die API nicht mehr abrufbar",
+                pair.symbol,
+            )
+
         records = self._fetch_all_records(
             "/api/v3/myTrades", since, "time", extra_params={"symbol": pair.symbol}
         )
