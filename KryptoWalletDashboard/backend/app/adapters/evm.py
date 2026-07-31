@@ -37,7 +37,9 @@ class EvmAdapter(TransactionAdapter):
         self.native_asset = native_asset
 
     def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
-        return self._native_transactions(since)
+        results = self._native_transactions(since)
+        results.extend(self._token_transactions(since))
+        return results
 
     def _native_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
         address_lower = self.address.lower()
@@ -71,6 +73,42 @@ class EvmAdapter(TransactionAdapter):
                     fee_amount=fee_amount,
                     fee_asset=fee_asset,
                     external_id=tx["hash"],
+                    raw_json=json.dumps(tx),
+                )
+            )
+        return results
+
+    def _token_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
+        address_lower = self.address.lower()
+        results: list[NormalizedTransaction] = []
+        for tx in self._fetch_all_pages("tokentx"):
+            timestamp = datetime.fromtimestamp(int(tx["timeStamp"]), tz=timezone.utc)
+            if since is not None and timestamp <= since:
+                continue
+            decimals = int(tx["tokenDecimal"])
+            amount = Decimal(tx["value"]) / Decimal(10**decimals)
+            if amount == 0:
+                continue
+
+            is_outgoing = tx["from"].lower() == address_lower
+            fee_amount = None
+            fee_asset = None
+            if is_outgoing:
+                fee_amount = (Decimal(tx["gasUsed"]) * Decimal(tx["gasPrice"])) / WEI_PER_NATIVE_UNIT
+                fee_asset = self.native_asset
+
+            results.append(
+                NormalizedTransaction(
+                    timestamp=timestamp,
+                    source_type=self.source_type,
+                    source_name=self.source_name,
+                    account_label=self.account_label,
+                    tx_type="transfer_out" if is_outgoing else "transfer_in",
+                    asset=tx["tokenSymbol"],
+                    amount=amount,
+                    fee_amount=fee_amount,
+                    fee_asset=fee_asset,
+                    external_id=f"{tx['hash']}-token-{tx['contractAddress']}",
                     raw_json=json.dumps(tx),
                 )
             )
