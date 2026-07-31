@@ -30,7 +30,13 @@ def _rows(csv_text: str) -> list[dict]:
 
 
 def test_export_includes_header_and_all_columns(db_session):
-    db_session.add(_tx(fee_amount=Decimal("0.0001"), fee_asset="BTC"))
+    db_session.add(
+        _tx(
+            fee_amount=Decimal("0.0001"),
+            fee_asset="BTC",
+            fee_value_chf=Decimal("5"),
+        )
+    )
     db_session.commit()
 
     rows = _rows(export_csv(db_session))
@@ -49,16 +55,44 @@ def test_export_includes_header_and_all_columns(db_session):
     assert row["Wert CHF"] == "50000"
     assert row["Gebuehr"] == "0.0001"
     assert row["Gebuehr Asset"] == "BTC"
+    assert row["Gebuehr CHF"] == "5"
     assert row["Referenz"] == "id1"
 
 
 def test_export_leaves_missing_fee_fields_blank(db_session):
-    db_session.add(_tx(fee_amount=None, fee_asset=None))
+    db_session.add(_tx(fee_amount=None, fee_asset=None, fee_value_chf=None))
     db_session.commit()
 
     rows = _rows(export_csv(db_session))
     assert rows[0]["Gebuehr"] == ""
     assert rows[0]["Gebuehr Asset"] == ""
+    assert rows[0]["Gebuehr CHF"] == ""
+
+
+def test_export_swap_includes_counter_asset_and_amount(db_session):
+    db_session.add(
+        _tx(
+            tx_type="swap",
+            asset="ETH",
+            amount=Decimal("2.5"),
+            counter_asset="BTC",
+            counter_amount=Decimal("0.15"),
+        )
+    )
+    db_session.commit()
+
+    rows = _rows(export_csv(db_session))
+    assert rows[0]["Gegen-Asset"] == "BTC"
+    assert rows[0]["Gegen-Menge"] == "0.15"
+
+
+def test_export_leaves_missing_counter_asset_fields_blank(db_session):
+    db_session.add(_tx(counter_asset=None, counter_amount=None))
+    db_session.commit()
+
+    rows = _rows(export_csv(db_session))
+    assert rows[0]["Gegen-Asset"] == ""
+    assert rows[0]["Gegen-Menge"] == ""
 
 
 def test_export_formats_small_amounts_without_scientific_notation(db_session):

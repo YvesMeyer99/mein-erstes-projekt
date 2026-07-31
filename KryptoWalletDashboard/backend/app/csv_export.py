@@ -14,10 +14,13 @@ COLUMNS = [
     "Typ",
     "Asset",
     "Menge",
+    "Gegen-Asset",
+    "Gegen-Menge",
     "Kurs CHF",
     "Wert CHF",
     "Gebuehr",
     "Gebuehr Asset",
+    "Gebuehr CHF",
     "Referenz",
 ]
 
@@ -55,10 +58,13 @@ def export_csv(
                 tx.tx_type,
                 tx.asset,
                 format(tx.amount, "f"),
+                tx.counter_asset or "",
+                format(tx.counter_amount, "f") if tx.counter_amount is not None else "",
                 format(tx.price_chf, "f") if tx.price_chf is not None else "",
                 format(tx.value_chf, "f") if tx.value_chf is not None else "",
                 format(tx.fee_amount, "f") if tx.fee_amount is not None else "",
                 tx.fee_asset or "",
+                format(tx.fee_value_chf, "f") if tx.fee_value_chf is not None else "",
                 tx.external_id,
             ]
         )
