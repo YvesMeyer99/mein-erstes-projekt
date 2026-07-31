@@ -87,9 +87,12 @@ Anders als Kraken (HMAC) nutzt Coinbase App API kurzlebige JWTs:
   wird für Phase 1 ignoriert; die bestehende CoinGecko-Preisanreicherung
   (Task-übergreifend, `sync.py`) übernimmt die CHF-Bewertung wie bei allen
   anderen Quellen.
-- `external_id` = Coinbase-Transaktions-`id` (pro Konto eindeutig; da
-  `account_label` bereits das Konto/den Account im Uniqueness-Constraint
-  mit abdeckt, reicht die reine Transaktions-ID).
+- `external_id` = Coinbase-Transaktions-`id`. Alle Coinbase-Sub-Konten
+  (BTC, ETH, EUR, ...) teilen sich denselben `account_label="coinbase-main"`
+  – `account_label` deckt das einzelne Sub-Konto im Uniqueness-Constraint
+  also gerade nicht ab. Die reine Transaktions-ID genügt trotzdem, weil
+  Coinbase-v2-Transaktions-IDs global eindeutige UUIDs sind (nicht bloss
+  pro Konto eindeutig).
 - Gebühren: Coinbase liefert bei `buy`/`sell` z.T. ein separates
   `fee`-Objekt; falls vorhanden wird es als `fee_amount`/`fee_asset`
   übernommen, sonst bleiben beide `None` (kein Fehler).
