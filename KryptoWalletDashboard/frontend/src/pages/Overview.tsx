@@ -13,7 +13,7 @@ function Overview() {
   useEffect(() => {
     fetchPortfolio()
       .then(setEntries)
-      .catch((err: Error) => setError(err.message));
+      .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
 
   if (error) {
@@ -28,7 +28,8 @@ function Overview() {
     return <div>Portfolio wird geladen…</div>;
   }
 
-  const totalValueChf = entries.reduce((sum, entry) => sum + (entry.value_chf ? Number(entry.value_chf) : 0), 0);
+  const totalValueChf = entries.reduce((sum, entry) => sum + (entry.value_chf !== null ? Number(entry.value_chf) : 0), 0);
+  const hasMissingPrices = entries.some((entry) => entry.value_chf === null);
   const chartData = entries
     .filter((entry) => entry.value_chf !== null)
     .map((entry) => ({ name: entry.asset, value: Number(entry.value_chf) }));
@@ -36,9 +37,12 @@ function Overview() {
   return (
     <div>
       <h2 className="mb-4 text-xl font-semibold">Übersicht</h2>
-      <p data-testid="portfolio-total" className="mb-6 text-2xl font-bold">
+      <p data-testid="portfolio-total" className={hasMissingPrices ? "mb-1 text-2xl font-bold" : "mb-6 text-2xl font-bold"}>
         {formatChf(totalValueChf.toString())}
       </p>
+      {hasMissingPrices && (
+        <p className="mb-6 text-sm text-gray-500">Kurs für mindestens ein Asset fehlt – Summe ist unvollständig.</p>
+      )}
 
       <table className="mb-8 w-full text-left text-sm">
         <thead>

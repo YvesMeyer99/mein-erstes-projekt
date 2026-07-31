@@ -63,6 +63,19 @@ describe("Overview", () => {
 
     expect(await screen.findByText("UNKNOWNTOKEN")).toBeInTheDocument();
     expect(screen.getByText("–")).toBeInTheDocument();
+    expect(screen.getByText(/Summe ist unvollständig/i)).toBeInTheDocument();
+  });
+
+  it("does not show the missing-price caveat when every entry has a value", async () => {
+    vi.spyOn(client, "fetchPortfolio").mockResolvedValue([
+      { asset: "BTC", amount: "1.5", price_chf: "50000", value_chf: "75000" },
+      { asset: "ETH", amount: "10", price_chf: "3000", value_chf: "30000" },
+    ]);
+
+    render(<Overview />);
+
+    expect(await screen.findByText("BTC")).toBeInTheDocument();
+    expect(screen.queryByText(/Summe ist unvollständig/i)).not.toBeInTheDocument();
   });
 
   it("renders an empty table without crashing when the portfolio is empty", async () => {
