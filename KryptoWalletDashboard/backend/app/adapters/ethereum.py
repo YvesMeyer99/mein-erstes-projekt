@@ -14,6 +14,7 @@ class EthereumAdapter(TransactionAdapter):
     source_type = "chain"
     source_name = "ethereum"
     API_URL = "https://api.etherscan.io/api"
+    PAGE_SIZE = 1000
 
     def __init__(self, account_label: str, address: str, api_key: str):
         super().__init__(account_label)
@@ -21,24 +22,9 @@ class EthereumAdapter(TransactionAdapter):
         self.api_key = api_key
 
     def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
-        params = {
-            "module": "account",
-            "action": "txlist",
-            "address": self.address,
-            "startblock": 0,
-            "endblock": 99999999,
-            "sort": "asc",
-            "apikey": self.api_key,
-        }
-        response = requests.get(self.API_URL, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if data.get("status") != "1" and data.get("message") != "No transactions found":
-            raise RuntimeError(f"Etherscan-Fehler: {data.get('message')}")
-
         address_lower = self.address.lower()
         results: list[NormalizedTransaction] = []
-        for tx in data.get("result", []):
+        for tx in self._fetch_all_pages():
             if tx.get("isError") == "1":
                 continue
             timestamp = datetime.fromtimestamp(int(tx["timeStamp"]), tz=timezone.utc)
@@ -71,3 +57,47 @@ class EthereumAdapter(TransactionAdapter):
                 )
             )
         return results
+
+    def _fetch_all_pages(self) -> list[dict]:
+        """Walk Etherscan's page/offset-paginated txlist endpoint.
+
+        Etherscan returns at most PAGE_SIZE records per call when page/offset
+        params are supplied. Keep requesting subsequent pages, incrementing
+        `page`, until a page comes back with fewer than PAGE_SIZE records (or
+        none at all) - that short page signals there is nothing left to
+        fetch.
+
+        Note: Etherscan also caps the *total* records reachable via a single
+        startblock/endblock window at 10'000, regardless of how page/offset
+        is used. Walking further pages beyond that ceiling would require
+        chunking the block range into multiple startblock/endblock windows,
+        which is out of scope here - this only guarantees a single sync call
+        retrieves everything available up to that per-window limit.
+        """
+        all_txs: list[dict] = []
+        page = 1
+        while True:
+            params = {
+                "module": "account",
+                "action": "txlist",
+                "address": self.address,
+                "startblock": 0,
+                "endblock": 99999999,
+                "page": page,
+                "offset": self.PAGE_SIZE,
+                "sort": "asc",
+                "apikey": self.api_key,
+            }
+            response = requests.get(self.API_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            if data.get("status") != "1" and data.get("message") != "No transactions found":
+                raise RuntimeError(f"Etherscan-Fehler: {data.get('message')}")
+
+            batch = data.get("result", [])
+            all_txs.extend(batch)
+            if len(batch) < self.PAGE_SIZE:
+                break
+            page += 1
+
+        return all_txs

@@ -106,3 +106,40 @@ def test_no_transactions_found_does_not_raise():
 
     adapter = EthereumAdapter(account_label="main", address=ADDRESS, api_key="key")
     assert adapter.fetch_transactions(None) == []
+
+
+@responses.activate
+def test_paginates_through_txlist_until_short_page():
+    # Page 1: a full page of PAGE_SIZE txs -> must fetch page 2.
+    page1 = [
+        _tx(f"0xpage1-{i}", 1700000000 + i, "0xSomeoneElse", ADDRESS, 10**18)
+        for i in range(EthereumAdapter.PAGE_SIZE)
+    ]
+    # Page 2: only 1 tx -> short page, pagination must stop here.
+    page2 = [_tx("0xpage2-0", 1700100000, "0xSomeoneElse", ADDRESS, 10**18)]
+
+    responses.add(
+        responses.GET,
+        "https://api.etherscan.io/api",
+        json={"status": "1", "message": "OK", "result": page1},
+        status=200,
+    )
+    responses.add(
+        responses.GET,
+        "https://api.etherscan.io/api",
+        json={"status": "1", "message": "OK", "result": page2},
+        status=200,
+    )
+
+    adapter = EthereumAdapter(account_label="main", address=ADDRESS, api_key="key")
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == EthereumAdapter.PAGE_SIZE + 1
+    assert {r.external_id for r in results} == {t["hash"] for t in page1} | {
+        t["hash"] for t in page2
+    }
+    # Only two HTTP calls: page 1 (full), then page 2 (short -> stop).
+    assert len(responses.calls) == 2
+    assert "page=1" in responses.calls[0].request.url
+    assert "page=2" in responses.calls[1].request.url
+    assert f"offset={EthereumAdapter.PAGE_SIZE}" in responses.calls[0].request.url
