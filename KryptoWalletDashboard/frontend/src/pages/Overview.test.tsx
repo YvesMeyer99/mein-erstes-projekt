@@ -21,8 +21,8 @@ describe("Overview", () => {
 
     render(<Overview />);
 
-    expect(await screen.findByText(/Fehler beim Laden/i)).toBeInTheDocument();
-    expect(screen.getByText(/Netzwerkfehler/)).toBeInTheDocument();
+    expect(await screen.findByText(/Netzwerkfehler/)).toBeInTheDocument();
+    expect(screen.getByText(/Läuft das Backend/i)).toBeInTheDocument();
   });
 
   it("renders portfolio entries in a table", async () => {

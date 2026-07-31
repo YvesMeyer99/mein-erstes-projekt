@@ -59,7 +59,8 @@ describe("Transactions", () => {
 
     render(<Transactions />);
 
-    expect(await screen.findByText(/Fehler beim Laden/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Netzwerkfehler/)).toBeInTheDocument();
+    expect(screen.getByText(/Läuft das Backend/i)).toBeInTheDocument();
   });
 
   it("renders fetched transactions in a table", async () => {

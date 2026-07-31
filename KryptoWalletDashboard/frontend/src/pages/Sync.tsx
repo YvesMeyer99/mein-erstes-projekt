@@ -33,7 +33,7 @@ function SyncPage() {
 
       {error && (
         <p className="mt-4 text-red-600">
-          Sync fehlgeschlagen: {error}. Läuft das Backend unter http://127.0.0.1:8000?
+          {error}. Läuft das Backend unter http://127.0.0.1:8000?
         </p>
       )}
 

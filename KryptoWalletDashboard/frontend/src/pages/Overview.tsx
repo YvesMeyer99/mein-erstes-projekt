@@ -19,7 +19,7 @@ function Overview() {
   if (error) {
     return (
       <div className="text-red-600">
-        Fehler beim Laden des Portfolios: {error}. Läuft das Backend unter http://127.0.0.1:8000?
+        {error}. Läuft das Backend unter http://127.0.0.1:8000?
       </div>
     );
   }

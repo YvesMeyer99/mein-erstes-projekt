@@ -43,7 +43,7 @@ function Transactions() {
   if (error) {
     return (
       <div className="text-red-600">
-        Fehler beim Laden der Transaktionen: {error}. Läuft das Backend unter http://127.0.0.1:8000?
+        {error}. Läuft das Backend unter http://127.0.0.1:8000?
       </div>
     );
   }

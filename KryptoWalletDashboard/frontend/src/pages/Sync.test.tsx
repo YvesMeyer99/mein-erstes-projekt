@@ -46,7 +46,8 @@ describe("SyncPage", () => {
     render(<SyncPage />);
     fireEvent.click(screen.getByRole("button", { name: "Jetzt synchronisieren" }));
 
-    expect(await screen.findByText(/Sync fehlgeschlagen/)).toBeInTheDocument();
+    expect(await screen.findByText(/Netzwerkfehler/)).toBeInTheDocument();
+    expect(screen.getByText(/Läuft das Backend/i)).toBeInTheDocument();
   });
 
   it("re-enables the button after the sync completes", async () => {
