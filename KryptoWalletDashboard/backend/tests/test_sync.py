@@ -100,6 +100,21 @@ def test_sync_enriches_fee_price_when_fee_amount_and_asset_are_present(db_sessio
     assert saved.fee_value_chf == Decimal("100") * Decimal("0.5")
 
 
+def test_sync_preserves_case_of_long_case_sensitive_asset_identifiers(db_session):
+    # Solana SPL-token transfers report a base58 mint address (case-
+    # sensitive, always well over a real ticker's length) as the asset when
+    # no human-readable symbol is available. normalize_asset() must not
+    # uppercase it -- that would silently corrupt an otherwise-valid mint
+    # into an unresolvable string (this is what the CSV export and the
+    # README's manual-lookup instructions rely on staying intact).
+    mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    adapter = FakeAdapter("main", transactions=[_tx("t1", asset=mint)])
+    sync_all(db_session, [adapter], FakePriceClient())
+
+    saved = db_session.query(Transaction).one()
+    assert saved.asset == mint
+
+
 def test_sync_skips_already_persisted_transactions(db_session):
     adapter = FakeAdapter("main", transactions=[_tx("t1")])
     sync_all(db_session, [adapter], FakePriceClient())

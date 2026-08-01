@@ -23,3 +23,13 @@ def test_normalization_is_case_insensitive():
     assert normalize_asset("xbt") == "BTC"
     assert normalize_asset("eth2") == "ETH"
     assert normalize_asset("btc") == "BTC"
+
+
+def test_long_case_sensitive_identifiers_pass_through_unchanged():
+    # Solana SPL-token transfers report a base58 mint address as the asset
+    # when no human-readable symbol is available (see
+    # app/adapters/solana.py). Base58 is case-sensitive -- uppercasing one
+    # of these would silently produce an unresolvable string, unlike short
+    # tickers (BTC, ETH2, ...) where uppercasing is safe and desired.
+    mint = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+    assert normalize_asset(mint) == mint
