@@ -326,3 +326,22 @@ def test_swap_produces_both_a_sol_leg_and_a_token_leg_with_distinct_external_ids
     token_leg = next(r for r in results if r.asset != "SOL")
     assert sol_leg.tx_type == "transfer_out"
     assert token_leg.tx_type == "transfer_in"
+
+
+@responses.activate
+def test_closed_token_account_counts_as_transfer_out():
+    _mock_rpc([_sig("sig-closed-account", 1700000900)])
+    tx = _tx([ADDRESS], pre_balances=[1000000000], post_balances=[1002000000])  # rent reclaimed
+    tx["meta"]["preTokenBalances"] = [
+        {"accountIndex": 1, "mint": "ClosedMint111111111111111111111111111111", "owner": ADDRESS, "uiTokenAmount": {"amount": "3000000", "decimals": 6}},
+    ]
+    tx["meta"]["postTokenBalances"] = []
+    _mock_rpc(tx)
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    token_results = [r for r in results if r.asset != "SOL"]
+    assert len(token_results) == 1
+    assert token_results[0].tx_type == "transfer_out"
+    assert token_results[0].amount == Decimal("3000000") / Decimal(10**6)
