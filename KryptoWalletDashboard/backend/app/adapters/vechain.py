@@ -10,6 +10,7 @@ from app.schemas import NormalizedTransaction
 API_URL = "https://sync-mainnet.vechain.org"
 WEI_PER_VET = Decimal(10**18)
 PAGE_LIMIT = 256
+TRANSFER_EVENT_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
 
 
 class VeChainAdapter(TransactionAdapter):
@@ -108,5 +109,87 @@ class VeChainAdapter(TransactionAdapter):
         )
 
     def _fetch_vip180_transfers(self, since) -> list[NormalizedTransaction]:
-        # A later task fills this in.
-        return []
+        entries = self._fetch_event_logs()
+        occurrence_counts: dict[tuple[str, int], int] = {}
+        results: list[NormalizedTransaction] = []
+        for entry in entries:
+            # Same stable-external_id pattern as _fetch_vet_transfers above:
+            # the occurrence index per (txID, clauseIndex) must be computed
+            # over the full unfiltered entries list, before since/self-
+            # transfer/zero-amount filtering, so a survivor's external_id
+            # never shifts across syncs depending on what an earlier `since`
+            # value happened to filter out. See the comment in
+            # _fetch_vet_transfers for the full rationale (this exact bug
+            # was found and fixed in Task 1's review for VET transfers, and
+            # would reappear here with a naive running-index-over-survivors
+            # loop if not applied).
+            key = (entry["meta"]["txID"], entry["meta"]["clauseIndex"])
+            occurrence = occurrence_counts.get(key, 0)
+            occurrence_counts[key] = occurrence + 1
+
+            ntx = self._normalize_vip180_entry(entry, since, occurrence)
+            if ntx is not None:
+                results.append(ntx)
+        return results
+
+    def _fetch_event_logs(self) -> list[dict]:
+        # See the pagination caveat on _fetch_transfer_logs above; the same
+        # offset-based-over-a-live-feed tradeoff applies here.
+        padded_address = "0x" + "0" * 24 + self.address[2:].lower()
+        all_entries: list[dict] = []
+        offset = 0
+        while True:
+            body = {
+                "criteriaSet": [
+                    {"topic0": TRANSFER_EVENT_TOPIC0, "topic1": padded_address},
+                    {"topic0": TRANSFER_EVENT_TOPIC0, "topic2": padded_address},
+                ],
+                "order": "desc",
+                "options": {"offset": offset, "limit": PAGE_LIMIT},
+            }
+            response = requests.post(f"{API_URL}/logs/event", json=body, timeout=15)
+            response.raise_for_status()
+            page = response.json()
+            all_entries.extend(page)
+            if len(page) < PAGE_LIMIT:
+                break
+            offset += PAGE_LIMIT
+        return all_entries
+
+    def _normalize_vip180_entry(self, entry: dict, since, index: int) -> NormalizedTransaction | None:
+        timestamp = datetime.fromtimestamp(entry["meta"]["blockTimestamp"], tz=timezone.utc)
+        if since is not None and timestamp <= since:
+            return None
+
+        topics = entry["topics"]
+        sender = "0x" + topics[1][-40:]
+        recipient = "0x" + topics[2][-40:]
+        if sender.lower() == recipient.lower():
+            return None
+
+        amount_raw = int(entry["data"], 16)
+        if amount_raw == 0:
+            return None
+
+        if recipient.lower() == self.address.lower():
+            tx_type = "transfer_in"
+        elif sender.lower() == self.address.lower():
+            tx_type = "transfer_out"
+        else:
+            return None
+
+        contract = entry["address"]
+        return NormalizedTransaction(
+            timestamp=timestamp,
+            source_type=self.source_type,
+            source_name=self.source_name,
+            account_label=self.account_label,
+            tx_type=tx_type,
+            asset=contract,
+            # Simplifying assumption: all VIP-180 tokens use 18 decimals
+            # (matches VET/VTHO and the overwhelming ERC-20/VIP-180
+            # convention). Documented trade-off, see design doc.
+            amount=Decimal(amount_raw) / WEI_PER_VET,
+            external_id=f"{entry['meta']['txID']}-{entry['meta']['clauseIndex']}-{contract}-{index}",
+            raw_json=json.dumps(entry),
+        )

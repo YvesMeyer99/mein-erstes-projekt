@@ -167,3 +167,143 @@ def test_external_id_stays_stable_across_syncs_when_since_filters_out_earlier_en
     entry_2_external_id_second_call = second_by_amount[Decimal("3")]
 
     assert entry_2_external_id_second_call == entry_2_external_id_first_call
+
+
+VTHO_CONTRACT = "0x0000000000000000000000000000456e65726779"
+TRANSFER_TOPIC0 = "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+
+
+def _padded_topic(address: str) -> str:
+    return "0x" + "0" * 24 + address[2:].lower()
+
+
+def _event_entry(contract, sender, recipient, amount, tx_id, clause_index, block_timestamp):
+    return {
+        "address": contract,
+        "topics": [TRANSFER_TOPIC0, _padded_topic(sender), _padded_topic(recipient)],
+        "data": hex(amount),
+        "meta": {
+            "blockID": "0x" + "0" * 64,
+            "blockNumber": 1,
+            "blockTimestamp": block_timestamp,
+            "txID": tx_id,
+            "txOrigin": sender,
+            "clauseIndex": clause_index,
+        },
+    }
+
+
+@responses.activate
+def test_incoming_vip180_token_transfer_is_transfer_in():
+    _mock_transfer_logs([])
+    _mock_event_logs(
+        [_event_entry(VTHO_CONTRACT, OTHER, ADDR, 10 * 10**18, "0xtx-vtho-in", 0, 1700000500)]
+    )
+
+    adapter = VeChainAdapter(account_label="main", address=ADDR)
+    results = adapter.fetch_transactions(None)
+
+    token_results = [r for r in results if r.asset != "VET"]
+    assert len(token_results) == 1
+    r = token_results[0]
+    assert r.tx_type == "transfer_in"
+    assert r.asset == VTHO_CONTRACT
+    assert r.amount == Decimal("10")
+
+
+@responses.activate
+def test_outgoing_vip180_token_transfer_is_transfer_out():
+    _mock_transfer_logs([])
+    _mock_event_logs(
+        [_event_entry(VTHO_CONTRACT, ADDR, OTHER, 3 * 10**18, "0xtx-vtho-out", 0, 1700000600)]
+    )
+
+    adapter = VeChainAdapter(account_label="main", address=ADDR)
+    results = adapter.fetch_transactions(None)
+
+    token_results = [r for r in results if r.asset != "VET"]
+    assert len(token_results) == 1
+    assert token_results[0].tx_type == "transfer_out"
+    assert token_results[0].amount == Decimal("3")
+
+
+@responses.activate
+def test_vip180_self_transfer_is_skipped():
+    _mock_transfer_logs([])
+    _mock_event_logs([_event_entry(VTHO_CONTRACT, ADDR, ADDR, 1 * 10**18, "0xtx-self", 0, 1700000700)])
+
+    adapter = VeChainAdapter(account_label="main", address=ADDR)
+    results = adapter.fetch_transactions(None)
+
+    assert results == []
+
+
+@responses.activate
+def test_vet_and_vip180_legs_in_one_tx_get_distinct_external_ids():
+    _mock_transfer_logs([_transfer_entry(ADDR, OTHER, 1 * 10**18, "0xtx-combo", 0, 1700000800)])
+    _mock_event_logs(
+        [_event_entry(VTHO_CONTRACT, OTHER, ADDR, 5 * 10**18, "0xtx-combo", 1, 1700000800)]
+    )
+
+    adapter = VeChainAdapter(account_label="main", address=ADDR)
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 2
+    external_ids = {r.external_id for r in results}
+    assert len(external_ids) == 2
+    vet_leg = next(r for r in results if r.asset == "VET")
+    token_leg = next(r for r in results if r.asset != "VET")
+    assert vet_leg.tx_type == "transfer_out"
+    assert token_leg.tx_type == "transfer_in"
+
+
+@responses.activate
+def test_different_vip180_contracts_are_kept_separate():
+    other_contract = "0x1111111111111111111111111111111111111a"
+    _mock_transfer_logs([])
+    _mock_event_logs(
+        [
+            _event_entry(VTHO_CONTRACT, OTHER, ADDR, 1 * 10**18, "0xtx-multi-token", 0, 1700000900),
+            _event_entry(other_contract, OTHER, ADDR, 2 * 10**18, "0xtx-multi-token", 1, 1700000900),
+        ]
+    )
+
+    adapter = VeChainAdapter(account_label="main", address=ADDR)
+    results = adapter.fetch_transactions(None)
+
+    assets = {r.asset for r in results}
+    assert assets == {VTHO_CONTRACT, other_contract}
+
+
+@responses.activate
+def test_vip180_external_id_stays_stable_across_syncs_when_since_filters_out_earlier_entries():
+    # Mirrors test_external_id_stays_stable_across_syncs_when_since_filters_out_earlier_entries
+    # above, but for VIP-180 entries. Three VTHO transfers sharing the same
+    # tx+clause; the occurrence index must be computed over the full
+    # unfiltered event-log list (keyed by txID+clauseIndex), not over
+    # post-filter survivors, so a later entry's external_id doesn't shift
+    # when an earlier one is dropped by `since` in a subsequent call.
+    entries = [
+        _event_entry(VTHO_CONTRACT, OTHER, ADDR, 1 * 10**18, "0xtx-vip180-stable", 0, 1700001000),
+        _event_entry(VTHO_CONTRACT, OTHER, ADDR, 2 * 10**18, "0xtx-vip180-stable", 0, 1700001100),
+        _event_entry(VTHO_CONTRACT, OTHER, ADDR, 3 * 10**18, "0xtx-vip180-stable", 0, 1700001200),
+    ]
+
+    _mock_transfer_logs([])
+    _mock_event_logs(entries)
+    adapter = VeChainAdapter(account_label="main", address=ADDR)
+    first_results = adapter.fetch_transactions(None)
+    first_by_amount = {r.amount: r.external_id for r in first_results if r.asset != "VET"}
+    assert len(first_by_amount) == 3
+    entry_2_external_id_first_call = first_by_amount[Decimal("3")]
+
+    since = datetime.fromtimestamp(1700001050, tz=timezone.utc)  # filters out entry 0 only
+    _mock_transfer_logs([])
+    _mock_event_logs(entries)
+    adapter2 = VeChainAdapter(account_label="main", address=ADDR)
+    second_results = adapter2.fetch_transactions(since)
+    second_by_amount = {r.amount: r.external_id for r in second_results if r.asset != "VET"}
+    assert len(second_by_amount) == 2  # entry 0 filtered out
+    entry_2_external_id_second_call = second_by_amount[Decimal("3")]
+
+    assert entry_2_external_id_second_call == entry_2_external_id_first_call
