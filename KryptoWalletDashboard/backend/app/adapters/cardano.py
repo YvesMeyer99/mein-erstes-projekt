@@ -208,3 +208,57 @@ class CardanoAdapter(TransactionAdapter):
         return [
             e for e in all_entries if datetime.fromtimestamp(e["block_time"], tz=timezone.utc) > since
         ]
+
+
+class CardanoStakeAdapter(TransactionAdapter):
+    source_type = "chain"
+    source_name = "cardano"
+
+    def __init__(self, account_label: str, stake_address: str):
+        super().__init__(account_label)
+        self.stake_address = stake_address
+
+    def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
+        owned_addresses = self._resolve_owned_addresses()
+        candidates = self._fetch_candidate_signatures(since)
+        if not candidates:
+            return []
+        tx_infos = _fetch_tx_infos([c["tx_hash"] for c in candidates])
+        results: list[NormalizedTransaction] = []
+        for tx in tx_infos:
+            results.extend(normalize_cardano_tx(tx, owned_addresses, self.account_label, since))
+        return results
+
+    def _resolve_owned_addresses(self) -> set[str]:
+        rows = _koios_post("/account_addresses", {"_stake_addresses": [self.stake_address]})
+        if not rows:
+            return set()
+        return set(rows[0].get("addresses", []))
+
+    def _fetch_candidate_signatures(self, since: datetime | None) -> list[dict]:
+        # /account_txs is a GET endpoint (unlike /address_txs, which is POST),
+        # so `_stake_address` and pagination both go via query-string params
+        # -- confirmed against the live Koios API. It needs no equivalent of
+        # /tx_info's "_inputs"/"_assets" flags: /account_addresses and
+        # /account_txs both returned fully populated data by default when
+        # tested against real, publicly known stake addresses.
+        all_entries: list[dict] = []
+        offset = 0
+        while True:
+            response = requests.get(
+                f"{API_URL}/account_txs",
+                params={"_stake_address": self.stake_address, "limit": PAGE_LIMIT, "offset": offset},
+                timeout=10,
+            )
+            response.raise_for_status()
+            page = response.json()
+            all_entries.extend(page)
+            if len(page) < PAGE_LIMIT:
+                break
+            offset += PAGE_LIMIT
+
+        if since is None:
+            return all_entries
+        return [
+            e for e in all_entries if datetime.fromtimestamp(e["block_time"], tz=timezone.utc) > since
+        ]
