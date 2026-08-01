@@ -262,6 +262,21 @@ def test_cardano_adapter_chunks_tx_info_requests_over_1000_hashes():
     assert len(second_chunk) == 500
 
 
+@responses.activate
+def test_fetch_tx_infos_requests_inputs_and_assets():
+    _mock_tx_info([])
+    from app.adapters.cardano import _fetch_tx_infos
+
+    _fetch_tx_infos(["some-hash"])
+
+    tx_info_call = responses.calls[0]
+    import json as _json
+
+    sent_body = _json.loads(tx_info_call.request.body)
+    assert sent_body.get("_inputs") is True
+    assert sent_body.get("_assets") is True
+
+
 from app.adapters.cardano import CardanoStakeAdapter
 
 STAKE_ADDR = "stake1uxyz0000000000000000000000000000000000000000000000000000"
@@ -343,3 +358,18 @@ def test_cardano_stake_adapter_since_excludes_old_transactions():
     results = adapter.fetch_transactions(since)
 
     assert [r.external_id for r in results] == ["tx-new-ADA"]
+
+
+@responses.activate
+def test_cardano_stake_adapter_requests_empty_addresses_from_account_addresses():
+    _mock_account_addresses(STAKE_ADDR, [ADDR])
+    _mock_account_txs([])
+
+    adapter = CardanoStakeAdapter(account_label="atomic", stake_address=STAKE_ADDR)
+    adapter.fetch_transactions(None)
+
+    account_addresses_call = next(c for c in responses.calls if c.request.url.endswith("/account_addresses"))
+    import json as _json
+
+    sent_body = _json.loads(account_addresses_call.request.body)
+    assert sent_body.get("_empty") is True

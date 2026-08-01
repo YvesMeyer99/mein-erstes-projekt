@@ -230,7 +230,16 @@ class CardanoStakeAdapter(TransactionAdapter):
         return results
 
     def _resolve_owned_addresses(self) -> set[str]:
-        rows = _koios_post("/account_addresses", {"_stake_addresses": [self.stake_address]})
+        # _empty defaults to false on Koios's side (confirmed against the
+        # live API): without it, /account_addresses silently excludes any
+        # payment address with a current zero balance -- i.e. every
+        # historical/spent change address -- which is exactly what this
+        # adapter exists to find. Confirmed live for
+        # stake1uxggf4shfvpghcangm67ky0q4zlc3xn7gezy0auhxczu3pslm9wrj:
+        # 2 addresses without the flag, 78 with it.
+        rows = _koios_post(
+            "/account_addresses", {"_stake_addresses": [self.stake_address], "_empty": True}
+        )
         if not rows:
             return set()
         return set(rows[0].get("addresses", []))
