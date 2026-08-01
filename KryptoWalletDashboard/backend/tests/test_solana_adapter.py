@@ -131,3 +131,110 @@ def test_paginates_through_signatures_until_short_page():
     sig_calls = [c for c in _rpc_calls() if c[0] == "getSignaturesForAddress"]
     assert len(sig_calls) == 2
     assert sig_calls[1][1][1]["before"] == "sig-999"
+
+
+from decimal import Decimal
+
+OTHER = "11111111111111111111111111111111111111111"
+
+
+def _tx(account_keys, pre_balances, post_balances, fee=5000):
+    return {
+        "transaction": {"message": {"accountKeys": account_keys}},
+        "meta": {
+            "preBalances": pre_balances,
+            "postBalances": post_balances,
+            "fee": fee,
+            "preTokenBalances": [],
+            "postTokenBalances": [],
+        },
+    }
+
+
+@responses.activate
+def test_incoming_sol_transfer_is_transfer_in():
+    _mock_rpc([_sig("sig-in", 1700000000)])
+    _mock_rpc(
+        _tx([OTHER, ADDRESS], pre_balances=[2000000000, 1000000000], post_balances=[1000000000, 2000000000])
+    )
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 1
+    tx = results[0]
+    assert tx.tx_type == "transfer_in"
+    assert tx.asset == "SOL"
+    assert tx.amount == Decimal("1000000000") / Decimal(10**9)
+    assert tx.fee_amount is None
+    assert tx.external_id == "sig-in-native"
+
+
+@responses.activate
+def test_outgoing_sol_transfer_as_fee_payer_includes_fee():
+    _mock_rpc([_sig("sig-out", 1700000100)])
+    # ADDRESS is accountKeys[0] -> the fee payer. Sent 0.5 SOL, paid a
+    # 5000-lamport fee; both are already reflected in the balance delta.
+    _mock_rpc(
+        _tx(
+            [ADDRESS, OTHER],
+            pre_balances=[2000000000, 0],
+            post_balances=[1499995000, 500000000],
+            fee=5000,
+        )
+    )
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 1
+    tx = results[0]
+    assert tx.tx_type == "transfer_out"
+    assert tx.amount == Decimal("500005000") / Decimal(10**9)
+    assert tx.fee_amount == Decimal("5000") / Decimal(10**9)
+    assert tx.fee_asset == "SOL"
+
+
+@responses.activate
+def test_outgoing_transfer_not_as_fee_payer_has_no_fee_attributed():
+    _mock_rpc([_sig("sig-out2", 1700000200)])
+    # ADDRESS is accountKeys[1], NOT the fee payer.
+    _mock_rpc(
+        _tx(
+            [OTHER, ADDRESS],
+            pre_balances=[2000000000, 1000000000],
+            post_balances=[1000000000, 500000000],
+            fee=5000,
+        )
+    )
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 1
+    tx = results[0]
+    assert tx.tx_type == "transfer_out"
+    assert tx.amount == Decimal("500000000") / Decimal(10**9)
+    assert tx.fee_amount is None
+
+
+@responses.activate
+def test_zero_net_change_produces_no_native_entry():
+    _mock_rpc([_sig("sig-noop", 1700000300)])
+    _mock_rpc(_tx([ADDRESS, OTHER], pre_balances=[1000000000, 0], post_balances=[1000000000, 0]))
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert results == []
+
+
+@responses.activate
+def test_address_not_present_in_account_keys_produces_no_entry():
+    _mock_rpc([_sig("sig-weird", 1700000400)])
+    _mock_rpc(_tx([OTHER], pre_balances=[1000000000], post_balances=[900000000]))
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert results == []

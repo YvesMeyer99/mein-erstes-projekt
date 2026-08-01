@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
@@ -71,5 +72,32 @@ class SolanaAdapter(TransactionAdapter):
     def _normalize_tx(
         self, tx: dict, signature: str, timestamp: datetime
     ) -> list[NormalizedTransaction]:
-        # A later task fills this in (native SOL leg, SPL token legs).
-        return []
+        results: list[NormalizedTransaction] = []
+
+        account_keys = tx["transaction"]["message"]["accountKeys"]
+        if self.address in account_keys:
+            idx = account_keys.index(self.address)
+            net_lamports = tx["meta"]["postBalances"][idx] - tx["meta"]["preBalances"][idx]
+            if net_lamports != 0:
+                fee_amount = None
+                fee_asset = None
+                if idx == 0 and net_lamports < 0:
+                    fee_amount = Decimal(tx["meta"]["fee"]) / LAMPORTS_PER_SOL
+                    fee_asset = "SOL"
+                results.append(
+                    NormalizedTransaction(
+                        timestamp=timestamp,
+                        source_type=self.source_type,
+                        source_name=self.source_name,
+                        account_label=self.account_label,
+                        tx_type="transfer_in" if net_lamports > 0 else "transfer_out",
+                        asset="SOL",
+                        amount=Decimal(abs(net_lamports)) / LAMPORTS_PER_SOL,
+                        fee_amount=fee_amount,
+                        fee_asset=fee_asset,
+                        external_id=f"{signature}-native",
+                        raw_json=json.dumps(tx),
+                    )
+                )
+
+        return results
