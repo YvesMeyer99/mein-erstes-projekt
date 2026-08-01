@@ -80,6 +80,17 @@ def test_failed_transactions_are_skipped_without_calling_gettransaction():
 
 
 @responses.activate
+def test_transaction_not_found_is_skipped():
+    _mock_rpc([_sig("sig-gone", 1700000000)])
+    _mock_rpc(None)
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert results == []
+
+
+@responses.activate
 def test_signatures_without_block_time_are_skipped():
     _mock_rpc([_sig("sig-pending", None)])
 

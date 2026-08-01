@@ -19,7 +19,7 @@ class SolanaAdapter(TransactionAdapter):
         super().__init__(account_label)
         self.address = address
 
-    def _rpc_call(self, method: str, params: list) -> dict:
+    def _rpc_call(self, method: str, params: list) -> dict | list | None:
         response = requests.post(
             API_URL,
             json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
@@ -28,7 +28,7 @@ class SolanaAdapter(TransactionAdapter):
         response.raise_for_status()
         body = response.json()
         if "error" in body:
-            raise RuntimeError(f"Solana RPC error calling {method}: {body['error']}")
+            raise RuntimeError(f"Solana-Fehler beim Aufruf von {method}: {body['error']}")
         return body["result"]
 
     def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
