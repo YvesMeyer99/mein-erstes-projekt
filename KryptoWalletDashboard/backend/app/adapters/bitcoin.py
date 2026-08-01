@@ -67,6 +67,18 @@ def normalize_bitcoin_tx(
     if since is not None and timestamp <= since:
         return None
 
+    vin_addresses = {
+        vin.get("prevout", {}).get("scriptpubkey_address") for vin in tx["vin"]
+    }
+    vout_addresses = {vout.get("scriptpubkey_address") for vout in tx["vout"]}
+    if vin_addresses <= owned_addresses and vout_addresses <= owned_addresses:
+        # Every input and every output belongs to the wallet -- a pure
+        # internal reshuffle (e.g. a spend from one owned address with
+        # change back to another owned address, common with HD wallets).
+        # No BTC left the wallet as a transfer; only the miner fee did,
+        # which is not treated as a taxable transfer event here.
+        return None
+
     vin_value = sum(
         vin.get("prevout", {}).get("value", 0)
         for vin in tx["vin"]
