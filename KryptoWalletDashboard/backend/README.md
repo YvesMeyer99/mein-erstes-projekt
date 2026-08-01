@@ -44,6 +44,26 @@ konfigurierten Wallet abgedeckt wird - beide Einträge haben zwangsläufig
 unterschiedliche Labels, wodurch dieselbe Transaktion doppelt gespeichert
 und im Portfolio sowie CSV-Export doppelt gezählt würde.
 
+## Solana
+
+Native SOL- und SPL-Token-Transfers werden automatisch erfasst, sobald
+`SOLANA_ADDRESSES` gesetzt ist. Anders als bei Bitcoin generieren
+Solana-Wallets (auch Ledger) keine neue Adresse pro Transaktion - jeder
+Account hat eine feste Adresse. Für mehrere Accounts (z.B. mehrere
+Ledger-Konten) einfach mehrere `label:adresse`-Paare komma-getrennt
+eintragen, wie bei `ETHEREUM_ADDRESSES`.
+
+### Bekannte Einschränkung: SPL-Tokens ohne Symbol/CHF-Kurs
+
+SPL-Token-Transfers (z.B. USDC auf Solana) werden vollständig erfasst
+(Menge, Zeitpunkt, Richtung), aber die Solana-API liefert kein
+Token-Symbol - nur die Mint-Adresse. Im CSV-Export erscheint daher die
+rohe Mint-Adresse statt eines lesbaren Namens wie "USDC", und ohne
+CHF-Kurs (analog zur bestehenden Einschränkung bei ERC-20-Tokens). Für
+die Steuererklärung muss die Mint-Adresse einmalig manuell einem
+bekannten Token zugeordnet werden (z.B. über einen Solana-Explorer wie
+solscan.io).
+
 ## Unterstützte EVM-Chains
 
 Seit Phase 2a werden neben Ethereum automatisch fünf weitere EVM-Chains
