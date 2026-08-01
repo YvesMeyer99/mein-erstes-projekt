@@ -41,6 +41,7 @@ def test_incoming_transaction_is_transfer_in():
     assert tx.asset == "BTC"
     assert tx.amount == Decimal("100000") / Decimal(10**8)
     assert tx.fee_amount is None
+    assert tx.fee_included_in_amount is False
     assert tx.external_id == "tx-in"
     assert tx.timestamp == datetime.fromtimestamp(1700000000, tz=timezone.utc)
 
@@ -73,6 +74,10 @@ def test_outgoing_transaction_is_transfer_out_with_fee():
     assert tx.amount == Decimal("160000") / Decimal(10**8)
     assert tx.fee_amount == Decimal("10000") / Decimal(10**8)
     assert tx.fee_asset == "BTC"
+    # `amount` already includes the fee (see the comment in
+    # normalize_bitcoin_tx) -- app.portfolio.compute_portfolio must not
+    # subtract fee_amount a second time for this transaction.
+    assert tx.fee_included_in_amount is True
 
 
 @responses.activate

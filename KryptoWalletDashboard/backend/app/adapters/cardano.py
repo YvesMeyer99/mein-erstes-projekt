@@ -83,6 +83,12 @@ def normalize_cardano_tx(
                 amount=abs(net_lovelace) / LOVELACE_PER_ADA,
                 fee_amount=fee_amount,
                 fee_asset=fee_asset,
+                # `amount` above is the total wallet-balance decrease
+                # (owned inputs - owned outputs), which already has the
+                # network fee baked in -- tells
+                # app.portfolio.compute_portfolio not to subtract
+                # fee_amount a second time.
+                fee_included_in_amount=fee_amount is not None,
                 external_id=f"{tx['tx_hash']}-ADA",
                 raw_json=json.dumps(tx),
             )

@@ -95,6 +95,12 @@ class SolanaAdapter(TransactionAdapter):
                         amount=Decimal(abs(net_lamports)) / LAMPORTS_PER_SOL,
                         fee_amount=fee_amount,
                         fee_asset=fee_asset,
+                        # `amount` above is the fee payer's total balance
+                        # change (postBalance - preBalance), which already
+                        # has the transaction fee baked in -- tells
+                        # app.portfolio.compute_portfolio not to subtract
+                        # fee_amount a second time.
+                        fee_included_in_amount=fee_amount is not None,
                         external_id=f"{signature}-native",
                         raw_json=json.dumps(tx),
                     )

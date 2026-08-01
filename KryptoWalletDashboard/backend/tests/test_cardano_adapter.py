@@ -34,6 +34,7 @@ def test_incoming_ada_transfer_is_transfer_in():
     assert r.asset == "ADA"
     assert r.amount == Decimal("1000000") / Decimal(10**6)
     assert r.fee_amount is None
+    assert r.fee_included_in_amount is False
     assert r.external_id == "tx-in-ADA"
     assert r.timestamp == datetime.fromtimestamp(1700000000, tz=timezone.utc)
 
@@ -55,6 +56,9 @@ def test_outgoing_ada_transfer_includes_fee():
     assert r.amount == Decimal("2000000") / Decimal(10**6)
     assert r.fee_amount == Decimal("170000") / Decimal(10**6)
     assert r.fee_asset == "ADA"
+    # `amount` already includes the fee -- app.portfolio.compute_portfolio
+    # must not subtract fee_amount a second time for this transaction.
+    assert r.fee_included_in_amount is True
 
 
 def test_change_to_a_different_owned_address_nets_correctly():

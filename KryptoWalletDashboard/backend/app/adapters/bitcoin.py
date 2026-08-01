@@ -112,6 +112,11 @@ def normalize_bitcoin_tx(
         amount=Decimal(abs(net_sats)) / SATS_PER_BTC,
         fee_amount=fee_amount,
         fee_asset=fee_asset,
+        # `amount` above is the total wallet-balance decrease (vin - vout
+        # over owned addresses), which already has the miner fee baked in --
+        # tells app.portfolio.compute_portfolio not to subtract fee_amount
+        # a second time.
+        fee_included_in_amount=fee_amount is not None,
         external_id=tx["txid"],
         raw_json=json.dumps(tx),
     )

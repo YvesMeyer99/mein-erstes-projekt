@@ -167,6 +167,7 @@ def test_incoming_sol_transfer_is_transfer_in():
     assert tx.asset == "SOL"
     assert tx.amount == Decimal("1000000000") / Decimal(10**9)
     assert tx.fee_amount is None
+    assert tx.fee_included_in_amount is False
     assert tx.external_id == "sig-in-native"
 
 
@@ -193,6 +194,10 @@ def test_outgoing_sol_transfer_as_fee_payer_includes_fee():
     assert tx.amount == Decimal("500005000") / Decimal(10**9)
     assert tx.fee_amount == Decimal("5000") / Decimal(10**9)
     assert tx.fee_asset == "SOL"
+    # `amount` already includes the fee (it's the fee payer's raw balance
+    # delta) -- app.portfolio.compute_portfolio must not subtract
+    # fee_amount a second time for this transaction.
+    assert tx.fee_included_in_amount is True
 
 
 @responses.activate
@@ -216,6 +221,7 @@ def test_outgoing_transfer_not_as_fee_payer_has_no_fee_attributed():
     assert tx.tx_type == "transfer_out"
     assert tx.amount == Decimal("500000000") / Decimal(10**9)
     assert tx.fee_amount is None
+    assert tx.fee_included_in_amount is False
 
 
 @responses.activate
