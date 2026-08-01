@@ -8,6 +8,36 @@
    (Kraken-Key **muss** read-only sein - keine Trade-/Auszahlungsrechte!)
 4. Datenbank einmalig anlegen: `.venv/Scripts/python -m app.init_db`
 
+## Bitcoin: einzelne Adressen vs. ganze HD-Wallets
+
+`BITCOIN_ADDRESSES` verfolgt einzelne, fest eingetragene Adressen -
+praktisch für z.B. eine einzelne Exchange-Einzahladresse, aber
+unpraktisch für ein normales Wallet (Ledger, Trezor, AtomicWallet), das
+für jede Transaktion eine neue Adresse generiert (HD-Wallet-Standard).
+
+Für ein ganzes HD-Wallet stattdessen `BITCOIN_XPUBS` mit dem **Extended
+Public Key** (xpub/ypub/zpub) des Wallets verwenden - zu finden in der
+Wallet-Software unter "xpub anzeigen" / "Konto-Details" / "Erweiterte
+öffentliche Adresse" (NICHT die einzelne Empfangsadresse, die die
+Wallet-App standardmäßig anzeigt). Das Dashboard leitet daraus
+automatisch alle bisher genutzten Adressen ab (Gap-Limit-Scanning,
+Standard-Grenzwert 20 - wie bei jeder Wallet-Software) und erfasst deren
+Transaktionen, inklusive korrekter Behandlung von Wechselgeld
+(Change-Adressen): interne Verschiebungen zwischen Adressen desselben
+Wallets werden nicht fälschlich als steuerrelevante Transaktion gezählt.
+
+**Wichtig:** der Extended Public Key erlaubt zwar niemandem, deine
+Bitcoins auszugeben (das geht nur mit dem privaten Schlüssel), macht
+aber deine **gesamte Adresshistorie und alle Kontostände dieses
+Wallets einsehbar** für jeden, der ihn kennt. Trotzdem vertraulich
+behandeln wie ein Passwort.
+
+**Achtung bei Tippfehlern:** die zugrundeliegende Bibliothek prüft die
+Prüfsumme des eingegebenen Schlüssels nicht - ein Tippfehler führt nicht
+zu einer Fehlermeldung, sondern lässt das Tool still eine falsche
+(vermutlich leere) Adresskette scannen. Den Wert beim Eintragen also
+sorgfältig kopieren.
+
 ## Unterstützte EVM-Chains
 
 Seit Phase 2a werden neben Ethereum automatisch fünf weitere EVM-Chains
