@@ -8,3 +8,4 @@ pytest
 responses
 httpx
 PyJWT[crypto]
+bitcoinlib
