@@ -3,6 +3,7 @@ from app.adapters.base import TransactionAdapter
 from app.adapters.binance import BinanceAdapter
 from app.adapters.bitcoin import BitcoinAdapter
 from app.adapters.bitcoin_xpub import BitcoinXpubAdapter
+from app.adapters.cardano import CardanoAdapter, CardanoStakeAdapter
 from app.adapters.coinbase import CoinbaseAdapter
 from app.adapters.evm import EvmAdapter
 from app.adapters.evm_chains import EVM_CHAINS
@@ -19,6 +20,10 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
         adapters.append(BitcoinXpubAdapter(account_label=wallet.label, extended_key=wallet.address))
     for wallet in config.SOLANA_WALLETS:
         adapters.append(SolanaAdapter(account_label=wallet.label, address=wallet.address))
+    for wallet in config.CARDANO_WALLETS:
+        adapters.append(CardanoAdapter(account_label=wallet.label, address=wallet.address))
+    for wallet in config.CARDANO_STAKE_WALLETS:
+        adapters.append(CardanoStakeAdapter(account_label=wallet.label, stake_address=wallet.address))
     for wallet in config.ETHEREUM_WALLETS:
         for chain in EVM_CHAINS:
             adapters.append(

@@ -20,6 +20,7 @@ COINGECKO_ID_MAP = {
     "BNB": "binancecoin",
     "MATIC": "matic-network",
     "SOL": "solana",
+    "ADA": "cardano",
 }
 
 MAX_RETRIES = 3

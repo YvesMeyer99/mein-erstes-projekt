@@ -278,3 +278,80 @@ def test_no_solana_adapters_when_none_configured(monkeypatch):
     adapters = build_adapters_from_config()
 
     assert not any(isinstance(a, SolanaAdapter) for a in adapters)
+
+
+def test_cardano_adapter_is_added_for_each_configured_address(monkeypatch):
+    from app.adapters.cardano import CardanoAdapter
+    from app.config import WalletConfig
+
+    monkeypatch.setattr(config, "CARDANO_WALLETS", [WalletConfig(label="main", address="addr1abc")])
+    monkeypatch.setattr(config, "CARDANO_STAKE_WALLETS", [])
+    monkeypatch.setattr(config, "SOLANA_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    cardano_adapters = [a for a in adapters if isinstance(a, CardanoAdapter)]
+    assert len(cardano_adapters) == 1
+    assert cardano_adapters[0].account_label == "main"
+    assert cardano_adapters[0].address == "addr1abc"
+
+
+def test_cardano_stake_adapter_is_added_for_each_configured_stake_address(monkeypatch):
+    from app.adapters.cardano import CardanoStakeAdapter
+    from app.config import WalletConfig
+
+    monkeypatch.setattr(config, "CARDANO_WALLETS", [])
+    monkeypatch.setattr(config, "CARDANO_STAKE_WALLETS", [WalletConfig(label="atomic", address="stake1abc")])
+    monkeypatch.setattr(config, "SOLANA_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    stake_adapters = [a for a in adapters if isinstance(a, CardanoStakeAdapter)]
+    assert len(stake_adapters) == 1
+    assert stake_adapters[0].account_label == "atomic"
+    assert stake_adapters[0].stake_address == "stake1abc"
+
+
+def test_no_cardano_adapters_when_none_configured(monkeypatch):
+    from app.adapters.cardano import CardanoAdapter, CardanoStakeAdapter
+
+    monkeypatch.setattr(config, "CARDANO_WALLETS", [])
+    monkeypatch.setattr(config, "CARDANO_STAKE_WALLETS", [])
+    monkeypatch.setattr(config, "SOLANA_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, (CardanoAdapter, CardanoStakeAdapter)) for a in adapters)
