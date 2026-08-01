@@ -22,7 +22,11 @@ COINGECKO_ID_MAP = {
     "SOL": "solana",
     "ADA": "cardano",
     "VET": "vechain",
-    "VTHO": "vethor-token",
+    # No "VTHO" entry: VIP-180 transfers (including VTHO) are stored with
+    # `asset` set to the contract address, never the "VTHO" symbol (see
+    # app/adapters/vechain.py), so a symbol-keyed map entry would be
+    # unreachable dead code. VIP-180 tokens are documented as unpriced
+    # in README.md.
 }
 
 MAX_RETRIES = 3
