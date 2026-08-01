@@ -16,6 +16,13 @@ class NormalizedTransaction(BaseModel):
     counter_amount: Decimal | None = None
     fee_amount: Decimal | None = None
     fee_asset: str | None = None
+    # True when `amount` is the total wallet-balance decrease and already
+    # has `fee_amount` baked in (Bitcoin/Cardano/Solana native transfers,
+    # where the on-chain balance change inherently includes the fee).
+    # False (the default) when `amount` and `fee_amount` are independent
+    # figures that both reduce the balance separately (EVM gas, Kraken
+    # ledger fees, ...). See app.portfolio.compute_portfolio.
+    fee_included_in_amount: bool = False
     external_id: str
     raw_json: str
 

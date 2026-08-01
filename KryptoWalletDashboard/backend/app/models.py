@@ -1,7 +1,7 @@
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import Date, DateTime, String, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, String, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
@@ -85,6 +85,7 @@ class Transaction(Base):
     fee_amount: Mapped[Decimal | None] = mapped_column(ExactDecimal, nullable=True)
     fee_asset: Mapped[str | None] = mapped_column(String(20), nullable=True)
     fee_value_chf: Mapped[Decimal | None] = mapped_column(ExactDecimal, nullable=True)
+    fee_included_in_amount: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     external_id: Mapped[str] = mapped_column(String(200))
     raw_json: Mapped[str] = mapped_column(String)
 
