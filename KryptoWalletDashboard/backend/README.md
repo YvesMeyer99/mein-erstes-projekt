@@ -8,6 +8,22 @@
    (Kraken-Key **muss** read-only sein - keine Trade-/Auszahlungsrechte!)
 4. Datenbank einmalig anlegen: `.venv/Scripts/python -m app.init_db`
 
+## Korrektur: doppelter Gebührenabzug bei Bitcoin/Cardano/Solana
+
+Bis zu diesem Fix hat `compute_portfolio()` bei ausgehenden Bitcoin-,
+Cardano- und Solana-Transfers mit Netzwerkgebühr die Gebühr
+**doppelt** vom Bestand abgezogen: einmal, weil `amount` bei diesen
+Chains bereits die volle Wallet-Bestandsänderung inklusive Gebühr ist,
+und ein zweites Mal über das separate `fee_amount`-Feld. Der
+ausgewiesene Bestand (und damit der Vermögenswert für die
+Steuererklärung) war dadurch für jede gebührenpflichtige ausgehende
+Transaktion in diesen drei Chains **zu niedrig**.
+
+Einmal `.venv/Scripts/python -m app.init_db` ausführen: das erkennt eine
+bestehende Datenbank-Datei automatisch, ergänzt die fehlende Spalte und
+korrigiert bereits gespeicherte Transaktionen rückwirkend - kein
+manuelles Neusynchronisieren nötig, kein Datenverlust.
+
 ## Bitcoin: einzelne Adressen vs. ganze HD-Wallets
 
 `BITCOIN_ADDRESSES` verfolgt einzelne, fest eingetragene Adressen -
