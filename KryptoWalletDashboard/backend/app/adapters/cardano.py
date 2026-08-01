@@ -198,6 +198,13 @@ class CardanoAdapter(TransactionAdapter):
 
         if since is None:
             return all_entries
+        # This filter narrows down which tx hashes even get fetched via
+        # /tx_info (avoiding wasted calls). normalize_cardano_tx() then
+        # filters by `since` again, independently, against `tx_timestamp`
+        # -- that's intentional, not leftover duplicate logic: it's a pure
+        # function shared by multiple callers (this adapter and the future
+        # stake-address adapter), so it enforces its own `since` contract
+        # regardless of what any particular caller already filtered out.
         return [
             e for e in all_entries if datetime.fromtimestamp(e["block_time"], tz=timezone.utc) > since
         ]

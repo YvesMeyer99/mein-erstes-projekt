@@ -237,3 +237,26 @@ def test_cardano_adapter_paginates_address_txs_until_short_page():
 
     address_txs_calls = [c for c in responses.calls if c.request.url.split("?")[0].endswith("/address_txs")]
     assert len(address_txs_calls) == 2
+
+
+@responses.activate
+def test_cardano_adapter_chunks_tx_info_requests_over_1000_hashes():
+    signatures = [_sig(f"tx-{i}", 1700000000 + i) for i in range(1500)]
+    # 1500 signatures also exceeds PAGE_LIMIT (1000) for /address_txs itself,
+    # so that pagination needs two mocked pages too, not just one.
+    _mock_address_txs(signatures[:1000])
+    _mock_address_txs(signatures[1000:])
+    _mock_tx_info([])
+    _mock_tx_info([])
+
+    adapter = CardanoAdapter(account_label="main", address=ADDR)
+    adapter.fetch_transactions(None)
+
+    tx_info_calls = [c for c in responses.calls if c.request.url.endswith("/tx_info")]
+    assert len(tx_info_calls) == 2
+    import json as _json
+
+    first_chunk = _json.loads(tx_info_calls[0].request.body)["_tx_hashes"]
+    second_chunk = _json.loads(tx_info_calls[1].request.body)["_tx_hashes"]
+    assert len(first_chunk) == 1000
+    assert len(second_chunk) == 500
