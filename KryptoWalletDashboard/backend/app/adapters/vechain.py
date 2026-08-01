@@ -178,7 +178,15 @@ class VeChainAdapter(TransactionAdapter):
         else:
             return None
 
-        contract = entry["address"]
+        # Lowercase for consistency with every other address in this file
+        # (VET sender/recipient, VIP-180 sender/recipient decoded from
+        # topics, self.address) and to defend against the Thorest API
+        # returning the same contract in different casing (e.g. checksummed
+        # vs. lowercase) across calls, which would otherwise fragment one
+        # token's history across two different `asset` values AND break
+        # external_id stability across syncs - the exact class of bug
+        # Task 1's occurrence-counting fix addressed for VET.
+        contract = entry["address"].lower()
         return NormalizedTransaction(
             timestamp=timestamp,
             source_type=self.source_type,
@@ -189,6 +197,14 @@ class VeChainAdapter(TransactionAdapter):
             # Simplifying assumption: all VIP-180 tokens use 18 decimals
             # (matches VET/VTHO and the overwhelming ERC-20/VIP-180
             # convention). Documented trade-off, see design doc.
+            # Precision: uses Python's default 28-significant-digit Decimal
+            # context. Safe for VET (fixed, capped supply) and for
+            # realistic personal-wallet-scale VIP-180 transfer amounts;
+            # accepted as an edge case that an extreme-supply token with a
+            # single transfer exceeding 28 significant digits could be
+            # silently rounded under the default context. Not worth the
+            # complexity of a per-call explicit-precision context for this
+            # personal-use tracker.
             amount=Decimal(amount_raw) / WEI_PER_VET,
             external_id=f"{entry['meta']['txID']}-{entry['meta']['clauseIndex']}-{contract}-{index}",
             raw_json=json.dumps(entry),
