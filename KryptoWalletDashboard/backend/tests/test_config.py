@@ -103,3 +103,13 @@ def test_bitcoin_xpubs_reuses_wallet_parsing():
     assert len(result) == 1
     assert result[0].label == "ledger"
     assert result[0].address.startswith("xpub")
+
+
+def test_solana_wallets_reuses_wallet_parsing():
+    from app.config import parse_wallets
+
+    result = parse_wallets("ledger-1:9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM,ledger-2:11111111111111111111111111111111111111111")
+
+    assert len(result) == 2
+    assert result[0].label == "ledger-1"
+    assert result[1].label == "ledger-2"

@@ -8,6 +8,7 @@ from app.adapters.evm import EvmAdapter
 from app.adapters.evm_chains import EVM_CHAINS
 from app.adapters.kraken import KrakenAdapter
 from app.adapters.mexc import MexcAdapter
+from app.adapters.solana import SolanaAdapter
 
 
 def build_adapters_from_config() -> list[TransactionAdapter]:
@@ -16,6 +17,8 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
         adapters.append(BitcoinAdapter(account_label=wallet.label, address=wallet.address))
     for wallet in config.BITCOIN_XPUBS:
         adapters.append(BitcoinXpubAdapter(account_label=wallet.label, extended_key=wallet.address))
+    for wallet in config.SOLANA_WALLETS:
+        adapters.append(SolanaAdapter(account_label=wallet.label, address=wallet.address))
     for wallet in config.ETHEREUM_WALLETS:
         for chain in EVM_CHAINS:
             adapters.append(

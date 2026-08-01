@@ -228,3 +228,53 @@ def test_no_bitcoin_xpub_adapters_when_none_configured(monkeypatch):
     adapters = build_adapters_from_config()
 
     assert not any(isinstance(a, BitcoinXpubAdapter) for a in adapters)
+
+
+def test_solana_adapter_is_added_for_each_configured_address(monkeypatch):
+    from app.adapters.solana import SolanaAdapter
+    from app.config import WalletConfig
+
+    monkeypatch.setattr(
+        config,
+        "SOLANA_WALLETS",
+        [WalletConfig(label="ledger-1", address="9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM")],
+    )
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    solana_adapters = [a for a in adapters if isinstance(a, SolanaAdapter)]
+    assert len(solana_adapters) == 1
+    assert solana_adapters[0].account_label == "ledger-1"
+    assert solana_adapters[0].address == "9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"
+
+
+def test_no_solana_adapters_when_none_configured(monkeypatch):
+    from app.adapters.solana import SolanaAdapter
+
+    monkeypatch.setattr(config, "SOLANA_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, SolanaAdapter) for a in adapters)

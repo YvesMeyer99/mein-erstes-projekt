@@ -19,6 +19,7 @@ COINGECKO_ID_MAP = {
     "ETH": "ethereum",
     "BNB": "binancecoin",
     "MATIC": "matic-network",
+    "SOL": "solana",
 }
 
 MAX_RETRIES = 3
