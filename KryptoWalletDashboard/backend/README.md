@@ -85,6 +85,13 @@ Transaktionshistorie einsehbar für jeden, der sie kennt (sie erlaubt
 aber keinerlei Zugriff auf deine Mittel) - trotzdem vertraulich
 behandeln wie ein Passwort.
 
+**Nicht überlappend konfigurieren:** trage keine Adresse in
+`CARDANO_ADDRESSES` ein, die auch von einem in `CARDANO_STAKE_ADDRESSES`
+konfigurierten Wallet abgedeckt wird - beide Einträge haben zwangsläufig
+unterschiedliche Labels, wodurch dieselbe Transaktion doppelt gespeichert
+und im Portfolio sowie CSV-Export doppelt gezählt würde (dieselbe
+Einschränkung wie bei `BITCOIN_ADDRESSES`/`BITCOIN_XPUBS`).
+
 ### Bekannte Einschränkung: Native Tokens ohne Symbol/CHF-Kurs/Dezimalstellen
 
 Cardano-Native-Tokens (z.B. Stablecoins, NFT-nahe Assets) werden
