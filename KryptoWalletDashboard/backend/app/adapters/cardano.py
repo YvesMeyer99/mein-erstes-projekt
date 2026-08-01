@@ -134,7 +134,7 @@ def _koios_post(path: str, body: dict, params: dict | None = None) -> list:
 
     Pagination is via `limit`/`offset` HTTP query-string parameters, NOT
     JSON body fields -- Koios's PostgREST backend validates the POST body
-    against a strict per-endpoint schema and rejects (400, "Query not
+    against a strict per-endpoint schema and rejects (404, "Query not
     found!") any body containing keys it doesn't recognize (e.g. `limit`
     inside the body for /address_txs), so `limit`/`offset` must be passed
     via `params`, confirmed against the live API.
