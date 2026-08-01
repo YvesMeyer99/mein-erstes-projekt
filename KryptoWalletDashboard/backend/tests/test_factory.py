@@ -180,3 +180,51 @@ def test_binance_adapter_is_not_added_when_only_partially_configured(monkeypatch
     adapters = build_adapters_from_config()
 
     assert not any(isinstance(a, BinanceAdapter) for a in adapters)
+
+
+def test_bitcoin_xpub_adapter_is_added_for_each_configured_xpub(monkeypatch):
+    from app.adapters.bitcoin_xpub import BitcoinXpubAdapter
+    from app.config import WalletConfig
+
+    monkeypatch.setattr(
+        config,
+        "BITCOIN_XPUBS",
+        [WalletConfig(label="ledger", address="xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8")],
+    )
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    xpub_adapters = [a for a in adapters if isinstance(a, BitcoinXpubAdapter)]
+    assert len(xpub_adapters) == 1
+    assert xpub_adapters[0].account_label == "ledger"
+    assert xpub_adapters[0].extended_key.startswith("xpub")
+
+
+def test_no_bitcoin_xpub_adapters_when_none_configured(monkeypatch):
+    from app.adapters.bitcoin_xpub import BitcoinXpubAdapter
+
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, BitcoinXpubAdapter) for a in adapters)

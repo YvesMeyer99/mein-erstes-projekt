@@ -93,3 +93,13 @@ def test_parse_sync_start_returns_none_for_invalid_format():
     from app.config import parse_sync_start
 
     assert parse_sync_start("not-a-date") is None
+
+
+def test_bitcoin_xpubs_reuses_wallet_parsing():
+    from app.config import parse_wallets
+
+    result = parse_wallets("ledger:xpub661MyMwAqRbcFtXgS5sYJABqqG9YLmC4Q1Rdap9gSE8NqtwybGhePY2gZ29ESFjqJoCu1Rupje8YtGqsefD265TMg7usUDFdp6W1EGMcet8")
+
+    assert len(result) == 1
+    assert result[0].label == "ledger"
+    assert result[0].address.startswith("xpub")

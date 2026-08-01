@@ -2,6 +2,7 @@ from app import config
 from app.adapters.base import TransactionAdapter
 from app.adapters.binance import BinanceAdapter
 from app.adapters.bitcoin import BitcoinAdapter
+from app.adapters.bitcoin_xpub import BitcoinXpubAdapter
 from app.adapters.coinbase import CoinbaseAdapter
 from app.adapters.evm import EvmAdapter
 from app.adapters.evm_chains import EVM_CHAINS
@@ -13,6 +14,8 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
     adapters: list[TransactionAdapter] = []
     for wallet in config.BITCOIN_WALLETS:
         adapters.append(BitcoinAdapter(account_label=wallet.label, address=wallet.address))
+    for wallet in config.BITCOIN_XPUBS:
+        adapters.append(BitcoinXpubAdapter(account_label=wallet.label, extended_key=wallet.address))
     for wallet in config.ETHEREUM_WALLETS:
         for chain in EVM_CHAINS:
             adapters.append(

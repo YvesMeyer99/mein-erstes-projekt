@@ -70,6 +70,7 @@ def normalize_pem_env_value(env_value: str | None) -> str:
 
 
 BITCOIN_WALLETS = parse_wallets(os.getenv("BITCOIN_ADDRESSES"))
+BITCOIN_XPUBS = parse_wallets(os.getenv("BITCOIN_XPUBS"))
 ETHEREUM_WALLETS = parse_wallets(os.getenv("ETHEREUM_ADDRESSES"))
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY", "")
 KRAKEN_API_KEY = os.getenv("KRAKEN_API_KEY", "")
