@@ -38,6 +38,12 @@ zu einer Fehlermeldung, sondern lässt das Tool still eine falsche
 (vermutlich leere) Adresskette scannen. Den Wert beim Eintragen also
 sorgfältig kopieren.
 
+**Nicht überlappend konfigurieren:** trage keine Adresse in
+`BITCOIN_ADDRESSES` ein, die auch von einem in `BITCOIN_XPUBS`
+konfigurierten Wallet abgedeckt wird - beide Einträge haben zwangsläufig
+unterschiedliche Labels, wodurch dieselbe Transaktion doppelt gespeichert
+und im Portfolio sowie CSV-Export doppelt gezählt würde.
+
 ## Unterstützte EVM-Chains
 
 Seit Phase 2a werden neben Ethereum automatisch fünf weitere EVM-Chains
