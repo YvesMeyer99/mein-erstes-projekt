@@ -100,4 +100,40 @@ class SolanaAdapter(TransactionAdapter):
                     )
                 )
 
+        results.extend(self._normalize_token_legs(tx, signature, timestamp))
+        return results
+
+    def _normalize_token_legs(self, tx: dict, signature: str, timestamp) -> list[NormalizedTransaction]:
+        pre_by_index = {b["accountIndex"]: b for b in tx["meta"].get("preTokenBalances", [])}
+        post_by_index = {b["accountIndex"]: b for b in tx["meta"].get("postTokenBalances", [])}
+
+        results: list[NormalizedTransaction] = []
+        for idx in sorted(set(pre_by_index) | set(post_by_index)):
+            pre_entry = pre_by_index.get(idx)
+            post_entry = post_by_index.get(idx)
+            reference = post_entry or pre_entry
+            if reference.get("owner") != self.address:
+                continue
+
+            mint = reference["mint"]
+            decimals = reference["uiTokenAmount"]["decimals"]
+            pre_amount = Decimal(pre_entry["uiTokenAmount"]["amount"]) if pre_entry else Decimal(0)
+            post_amount = Decimal(post_entry["uiTokenAmount"]["amount"]) if post_entry else Decimal(0)
+            net = post_amount - pre_amount
+            if net == 0:
+                continue
+
+            results.append(
+                NormalizedTransaction(
+                    timestamp=timestamp,
+                    source_type=self.source_type,
+                    source_name=self.source_name,
+                    account_label=self.account_label,
+                    tx_type="transfer_in" if net > 0 else "transfer_out",
+                    asset=mint,
+                    amount=abs(net) / Decimal(10**decimals),
+                    external_id=f"{signature}-{mint}",
+                    raw_json=json.dumps(tx),
+                )
+            )
         return results

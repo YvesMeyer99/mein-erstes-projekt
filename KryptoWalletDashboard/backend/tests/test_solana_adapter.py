@@ -238,3 +238,91 @@ def test_address_not_present_in_account_keys_produces_no_entry():
     results = adapter.fetch_transactions(None)
 
     assert results == []
+
+
+USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"
+
+
+@responses.activate
+def test_incoming_spl_token_transfer_is_transfer_in():
+    _mock_rpc([_sig("sig-token-in", 1700000500)])
+    tx = _tx([ADDRESS, OTHER], pre_balances=[1000000000, 0], post_balances=[1000000000, 0])
+    tx["meta"]["preTokenBalances"] = [
+        {"accountIndex": 2, "mint": USDC_MINT, "owner": ADDRESS, "uiTokenAmount": {"amount": "1000000", "decimals": 6}},
+    ]
+    tx["meta"]["postTokenBalances"] = [
+        {"accountIndex": 2, "mint": USDC_MINT, "owner": ADDRESS, "uiTokenAmount": {"amount": "1500000", "decimals": 6}},
+    ]
+    _mock_rpc(tx)
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 1
+    r = results[0]
+    assert r.tx_type == "transfer_in"
+    assert r.asset == USDC_MINT
+    assert r.amount == Decimal("500000") / Decimal(10**6)
+    assert r.external_id == f"sig-token-in-{USDC_MINT}"
+
+
+@responses.activate
+def test_newly_created_token_account_with_no_prior_balance_counts_as_transfer_in():
+    _mock_rpc([_sig("sig-new-account", 1700000600)])
+    tx = _tx([ADDRESS], pre_balances=[1000000000], post_balances=[997000000])  # rent for new token account
+    tx["meta"]["preTokenBalances"] = []
+    tx["meta"]["postTokenBalances"] = [
+        {"accountIndex": 1, "mint": "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", "owner": ADDRESS, "uiTokenAmount": {"amount": "5000000", "decimals": 6}},
+    ]
+    _mock_rpc(tx)
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    token_results = [r for r in results if r.asset != "SOL"]
+    assert len(token_results) == 1
+    assert token_results[0].tx_type == "transfer_in"
+    assert token_results[0].amount == Decimal("5000000") / Decimal(10**6)
+
+
+@responses.activate
+def test_token_balance_for_a_different_owner_is_ignored():
+    _mock_rpc([_sig("sig-other-owner", 1700000700)])
+    tx = _tx([ADDRESS, OTHER], pre_balances=[1000000000, 0], post_balances=[1000000000, 0])
+    tx["meta"]["preTokenBalances"] = [
+        {"accountIndex": 2, "mint": "SomeMint111111111111111111111111111111111", "owner": OTHER, "uiTokenAmount": {"amount": "1000000", "decimals": 6}},
+    ]
+    tx["meta"]["postTokenBalances"] = [
+        {"accountIndex": 2, "mint": "SomeMint111111111111111111111111111111111", "owner": OTHER, "uiTokenAmount": {"amount": "2000000", "decimals": 6}},
+    ]
+    _mock_rpc(tx)
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert results == []
+
+
+@responses.activate
+def test_swap_produces_both_a_sol_leg_and_a_token_leg_with_distinct_external_ids():
+    _mock_rpc([_sig("sig-swap", 1700000800)])
+    token_mint = "TokenMint1111111111111111111111111111111"
+    tx = _tx([ADDRESS, OTHER], pre_balances=[2000000000, 0], post_balances=[1000000000, 0], fee=5000)
+    tx["meta"]["preTokenBalances"] = [
+        {"accountIndex": 1, "mint": token_mint, "owner": ADDRESS, "uiTokenAmount": {"amount": "0", "decimals": 6}},
+    ]
+    tx["meta"]["postTokenBalances"] = [
+        {"accountIndex": 1, "mint": token_mint, "owner": ADDRESS, "uiTokenAmount": {"amount": "1000000", "decimals": 6}},
+    ]
+    _mock_rpc(tx)
+
+    adapter = SolanaAdapter(account_label="main", address=ADDRESS)
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 2
+    external_ids = {r.external_id for r in results}
+    assert external_ids == {"sig-swap-native", f"sig-swap-{token_mint}"}
+    sol_leg = next(r for r in results if r.asset == "SOL")
+    token_leg = next(r for r in results if r.asset != "SOL")
+    assert sol_leg.tx_type == "transfer_out"
+    assert token_leg.tx_type == "transfer_in"
