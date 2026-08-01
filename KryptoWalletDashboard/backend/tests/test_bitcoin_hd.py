@@ -1,3 +1,5 @@
+from bitcoinlib.keys import HDKey
+
 from app.adapters.bitcoin_hd import derive_address
 
 # BIP32 official spec test vector 1 master public key -- well-known, public
@@ -37,8 +39,6 @@ def test_ypub_produces_a_p2sh_segwit_address():
     # Convert the same underlying key material to a ypub (BIP49) test
     # fixture using bitcoinlib itself, rather than hand-writing/guessing a
     # ypub string.
-    from bitcoinlib.keys import HDKey
-
     k = HDKey(import_key=TEST_XPUB)
     ypub = k.public_master(witness_type="p2sh-segwit").wif()
 
@@ -48,8 +48,6 @@ def test_ypub_produces_a_p2sh_segwit_address():
 
 
 def test_zpub_produces_a_native_segwit_address():
-    from bitcoinlib.keys import HDKey
-
     k = HDKey(import_key=TEST_XPUB)
     zpub = k.public_master(witness_type="segwit").wif()
 
