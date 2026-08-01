@@ -78,6 +78,58 @@ def test_fee_reduces_balance_of_fee_asset(db_session):
     assert portfolio["ETH"]["amount"] == Decimal("-1.001")
 
 
+def test_fee_included_in_amount_is_not_subtracted_a_second_time(db_session):
+    # Regression test: Bitcoin/Cardano/Solana's native-transfer adapters
+    # compute `amount` as the transaction's *total* wallet-balance decrease,
+    # which already has the fee baked in (see e.g.
+    # app.adapters.bitcoin.normalize_bitcoin_tx). Unlike
+    # test_fee_reduces_balance_of_fee_asset above (an EVM-style transfer,
+    # where `amount` is only the transferred value and the gas fee is a
+    # fully independent deduction), subtracting `fee_amount` again here
+    # would double-count the fee that's already part of `amount`.
+    db_session.add(
+        _tx(
+            external_id="1",
+            tx_type="transfer_out",
+            asset="BTC",
+            amount=Decimal("0.0016"),
+            fee_amount=Decimal("0.0001"),
+            fee_asset="BTC",
+            fee_included_in_amount=True,
+        )
+    )
+    db_session.commit()
+
+    portfolio = {row["asset"]: row for row in compute_portfolio(db_session)}
+    assert portfolio["BTC"]["amount"] == Decimal("-0.0016")
+
+
+def test_fee_value_chf_price_source_still_applies_when_fee_included_in_amount(db_session):
+    # The fee-asset price derivation (used so a fee paid in an asset with
+    # no other priced transaction, e.g. a Cardano transfer's ADA fee, still
+    # gets a price_chf) must keep working even when the fee is already
+    # folded into `amount` and therefore not separately subtracted from the
+    # balance -- these are two independent uses of fee_amount/fee_value_chf.
+    db_session.add(
+        _tx(
+            external_id="1",
+            tx_type="transfer_out",
+            asset="BTC",
+            amount=Decimal("0.0016"),
+            price_chf=None,
+            value_chf=None,
+            fee_amount=Decimal("0.0001"),
+            fee_asset="BTC",
+            fee_value_chf=Decimal("5"),
+            fee_included_in_amount=True,
+        )
+    )
+    db_session.commit()
+
+    portfolio = {row["asset"]: row for row in compute_portfolio(db_session)}
+    assert portfolio["BTC"]["price_chf"] == Decimal("5") / Decimal("0.0001")
+
+
 def test_missing_price_yields_none_value(db_session):
     db_session.add(_tx(external_id="1", tx_type="transfer_in", amount=Decimal("1"), price_chf=None, value_chf=None))
     db_session.commit()

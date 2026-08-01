@@ -28,7 +28,13 @@ def compute_portfolio(session: Session) -> list[dict]:
             if tx.counter_asset is not None:
                 add_balance(tx.counter_asset, -(tx.counter_amount or Decimal(0)))
 
-        if tx.fee_amount and tx.fee_asset and tx.tx_type != "fee":
+        # Some adapters (Bitcoin/Cardano/Solana native transfers) compute
+        # `amount` as the transaction's total wallet-balance decrease, which
+        # already has the fee baked in -- subtracting fee_amount again here
+        # would double-count it. Only adapters where `amount` and
+        # `fee_amount` are independent figures (EVM gas, exchange ledger
+        # fees, ...) need this separate deduction.
+        if tx.fee_amount and tx.fee_asset and tx.tx_type != "fee" and not tx.fee_included_in_amount:
             add_balance(tx.fee_asset, -tx.fee_amount)
 
         if tx.value_chf is not None and tx.amount != 0:
