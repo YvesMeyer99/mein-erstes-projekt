@@ -64,6 +64,38 @@ die Steuererklärung muss die Mint-Adresse einmalig manuell einem
 bekannten Token zugeordnet werden (z.B. über einen Solana-Explorer wie
 solscan.io).
 
+## Cardano
+
+Native ADA- und Cardano-Native-Token-Transfers (CNTs) werden automatisch
+erfasst, sobald `CARDANO_ADDRESSES` und/oder `CARDANO_STAKE_ADDRESSES`
+gesetzt sind.
+
+**Stake-Adresse (empfohlen) vs. einzelne Adresse:** wie Bitcoin können
+Cardano-Wallets pro Transaktion neue Zahlungsadressen generieren - eine
+einzelne fest eingetragene Adresse (`CARDANO_ADDRESSES`) kann daher
+Transaktionen verpassen. `CARDANO_STAKE_ADDRESSES` (die Stake-Adresse
+deines Wallets, beginnt mit `stake1...`, zu finden z.B. in AtomicWallet
+unter den Cardano-Konto-Details) löst das eleganter als bei Bitcoin: die
+verwendete Koios-API kennt bereits alle Zahlungsadressen, die je zu
+dieser Stake-Adresse gehört haben, und liefert deren komplette
+Transaktionshistorie direkt - keine eigene Adress-Ableitung nötig.
+
+**Wichtig:** die Stake-Adresse macht deine gesamte Adress-/
+Transaktionshistorie einsehbar für jeden, der sie kennt (sie erlaubt
+aber keinerlei Zugriff auf deine Mittel) - trotzdem vertraulich
+behandeln wie ein Passwort.
+
+### Bekannte Einschränkung: Native Tokens ohne Symbol/CHF-Kurs/Dezimalstellen
+
+Cardano-Native-Tokens (z.B. Stablecoins, NFT-nahe Assets) werden
+vollständig erfasst (Menge, Zeitpunkt, Richtung), aber ohne lesbaren
+Namen (nur Policy-ID + Asset-Name als roher Bezeichner), ohne CHF-Kurs,
+und **ohne Dezimalstellen-Anpassung** (Cardano hat anders als bei
+SPL-Tokens kein protokollseitiges Decimals-Feld - die Menge erscheint
+als rohe Ganzzahl). Für die Steuererklärung muss der Bezeichner einmalig
+manuell einem bekannten Token zugeordnet werden (z.B. über einen
+Cardano-Explorer wie cardanoscan.io).
+
 ## Unterstützte EVM-Chains
 
 Seit Phase 2a werden neben Ethereum automatisch fünf weitere EVM-Chains
