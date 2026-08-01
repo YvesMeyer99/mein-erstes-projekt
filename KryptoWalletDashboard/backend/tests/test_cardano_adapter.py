@@ -1,7 +1,9 @@
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from app.adapters.cardano import normalize_cardano_tx
+import responses
+
+from app.adapters.cardano import CardanoAdapter, normalize_cardano_tx
 
 ADDR = "addr1qxy2lpan99fcnhhwz097erhm0k5m2gce8hcx6ycpwslzcxwgtpsxx4qkumaq"
 OTHER = "addr1qother0000000000000000000000000000000000000000000000000000"
@@ -159,3 +161,79 @@ def test_since_filters_out_older_transactions():
     results = normalize_cardano_tx(tx, {ADDR}, "main", since)
 
     assert results == []
+
+
+API_URL = "https://api.koios.rest/api/v1"
+
+
+def _sig(tx_hash, block_time):
+    return {"tx_hash": tx_hash, "block_height": 1, "block_time": block_time}
+
+
+def _mock_address_txs(result):
+    responses.add(responses.POST, f"{API_URL}/address_txs", json=result, status=200)
+
+
+def _mock_tx_info(result):
+    responses.add(responses.POST, f"{API_URL}/tx_info", json=result, status=200)
+
+
+@responses.activate
+def test_cardano_adapter_fetches_and_normalizes_transactions():
+    _mock_address_txs([_sig("tx-in", 1700000000)])
+    _mock_tx_info(
+        [_tx("tx-in", 1700000000, inputs=[_utxo(OTHER, 2000000)], outputs=[_utxo(ADDR, 1000000), _utxo(OTHER, 800000)])]
+    )
+
+    adapter = CardanoAdapter(account_label="main", address=ADDR)
+    results = adapter.fetch_transactions(None)
+
+    assert len(results) == 1
+    assert results[0].tx_type == "transfer_in"
+    assert results[0].amount == Decimal("1000000") / Decimal(10**6)
+
+
+@responses.activate
+def test_cardano_adapter_no_transactions_means_no_tx_info_call():
+    _mock_address_txs([])
+
+    adapter = CardanoAdapter(account_label="main", address=ADDR)
+    results = adapter.fetch_transactions(None)
+
+    assert results == []
+    tx_info_calls = [c for c in responses.calls if c.request.url.endswith("/tx_info")]
+    assert len(tx_info_calls) == 0
+
+
+@responses.activate
+def test_cardano_adapter_since_excludes_old_signatures_from_tx_info_call():
+    _mock_address_txs([_sig("tx-old", 1700000000), _sig("tx-new", 1700001000)])
+    _mock_tx_info(
+        [_tx("tx-new", 1700001000, inputs=[_utxo(OTHER, 2000000)], outputs=[_utxo(ADDR, 1000000)])]
+    )
+
+    since = datetime.fromtimestamp(1700000500, tz=timezone.utc)
+    adapter = CardanoAdapter(account_label="main", address=ADDR)
+    results = adapter.fetch_transactions(since)
+
+    assert [r.external_id for r in results] == ["tx-new-ADA"]
+    tx_info_call = next(c for c in responses.calls if c.request.url.endswith("/tx_info"))
+    import json as _json
+
+    sent_hashes = _json.loads(tx_info_call.request.body)["_tx_hashes"]
+    assert sent_hashes == ["tx-new"]
+
+
+@responses.activate
+def test_cardano_adapter_paginates_address_txs_until_short_page():
+    full_page = [_sig(f"tx-{i}", 1700000000 + i) for i in range(1000)]
+    short_page = [_sig("tx-last", 1700002000)]
+    _mock_address_txs(full_page)
+    _mock_address_txs(short_page)
+    _mock_tx_info([])
+
+    adapter = CardanoAdapter(account_label="main", address=ADDR)
+    adapter.fetch_transactions(None)
+
+    address_txs_calls = [c for c in responses.calls if c.request.url.split("?")[0].endswith("/address_txs")]
+    assert len(address_txs_calls) == 2

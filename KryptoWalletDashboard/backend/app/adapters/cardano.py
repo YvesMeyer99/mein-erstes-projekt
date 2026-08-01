@@ -2,17 +2,24 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 
+import requests
+
+from app.adapters.base import TransactionAdapter
 from app.schemas import NormalizedTransaction
 
 LOVELACE_PER_ADA = Decimal(10**6)
+API_URL = "https://api.koios.rest/api/v1"
+PAGE_LIMIT = 1000
 
 
 def _extract_address(utxo: dict) -> str | None:
-    """Koios's payment address field shape was not fully confirmed during
-    design-time research -- this defensively supports both a nested
-    {"bech32": "addr1..."} object and a plain "addr1..." string. Verify
-    against Koios's actual live response in a later task and simplify this
-    if only one shape is ever seen in practice."""
+    """Confirmed against the live Koios API and its OpenAPI schema
+    (koiosapi.yaml): `payment_addr` is always a nested
+    {"cred": "...", "bech32": "addr1..."} object, never a plain string.
+    The plain-string branch below is kept as a harmless defensive fallback
+    (it was never observed in practice) rather than removed, since it
+    costs nothing and Koios does not formally guarantee the shape won't
+    ever change."""
     addr = utxo.get("payment_addr")
     if isinstance(addr, dict):
         return addr.get("bech32")
@@ -120,3 +127,77 @@ def _normalize_native_tokens(
             )
         )
     return results
+
+
+def _koios_post(path: str, body: dict, params: dict | None = None) -> list:
+    """POST to a Koios (PostgREST-based) RPC endpoint.
+
+    Pagination is via `limit`/`offset` HTTP query-string parameters, NOT
+    JSON body fields -- Koios's PostgREST backend validates the POST body
+    against a strict per-endpoint schema and rejects (400, "Query not
+    found!") any body containing keys it doesn't recognize (e.g. `limit`
+    inside the body for /address_txs), so `limit`/`offset` must be passed
+    via `params`, confirmed against the live API.
+    """
+    response = requests.post(f"{API_URL}{path}", json=body, params=params, timeout=10)
+    response.raise_for_status()
+    return response.json()
+
+
+def _fetch_tx_infos(tx_hashes: list[str]) -> list[dict]:
+    if not tx_hashes:
+        return []
+    all_tx_infos: list[dict] = []
+    for i in range(0, len(tx_hashes), PAGE_LIMIT):
+        chunk = tx_hashes[i : i + PAGE_LIMIT]
+        all_tx_infos.extend(
+            _koios_post(
+                "/tx_info",
+                # _inputs and _assets default to false on Koios's side (confirmed
+                # against the live API): without them, /tx_info silently returns
+                # "inputs": [] and every "asset_list": [] with a 200 OK, which
+                # would make normalize_cardano_tx's netting logic look like every
+                # transaction is incoming-only and has no native tokens.
+                {"_tx_hashes": chunk, "_inputs": True, "_assets": True},
+            )
+        )
+    return all_tx_infos
+
+
+class CardanoAdapter(TransactionAdapter):
+    source_type = "chain"
+    source_name = "cardano"
+
+    def __init__(self, account_label: str, address: str):
+        super().__init__(account_label)
+        self.address = address
+
+    def fetch_transactions(self, since: datetime | None) -> list[NormalizedTransaction]:
+        candidates = self._fetch_candidate_signatures(since)
+        if not candidates:
+            return []
+        tx_infos = _fetch_tx_infos([c["tx_hash"] for c in candidates])
+        results: list[NormalizedTransaction] = []
+        for tx in tx_infos:
+            results.extend(normalize_cardano_tx(tx, {self.address}, self.account_label, since))
+        return results
+
+    def _fetch_candidate_signatures(self, since: datetime | None) -> list[dict]:
+        all_entries: list[dict] = []
+        offset = 0
+        while True:
+            page = _koios_post(
+                "/address_txs",
+                {"_addresses": [self.address]},
+                params={"limit": PAGE_LIMIT, "offset": offset},
+            )
+            all_entries.extend(page)
+            if len(page) < PAGE_LIMIT:
+                break
+            offset += PAGE_LIMIT
+
+        if since is None:
+            return all_entries
+        return [
+            e for e in all_entries if datetime.fromtimestamp(e["block_time"], tz=timezone.utc) > since
+        ]
