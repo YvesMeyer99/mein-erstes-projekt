@@ -57,7 +57,15 @@ class TzCheckingAdapter(TransactionAdapter):
         return self._transactions
 
 
-def _tx(external_id, amount="1", tx_type="transfer_in", asset="FAKE", fee_amount=None, fee_asset=None):
+def _tx(
+    external_id,
+    amount="1",
+    tx_type="transfer_in",
+    asset="FAKE",
+    fee_amount=None,
+    fee_asset=None,
+    fee_included_in_amount=False,
+):
     return NormalizedTransaction(
         timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
         source_type="chain",
@@ -68,6 +76,7 @@ def _tx(external_id, amount="1", tx_type="transfer_in", asset="FAKE", fee_amount
         amount=Decimal(amount),
         fee_amount=Decimal(fee_amount) if fee_amount is not None else None,
         fee_asset=fee_asset,
+        fee_included_in_amount=fee_included_in_amount,
         external_id=external_id,
         raw_json="{}",
     )
@@ -98,6 +107,21 @@ def test_sync_enriches_fee_price_when_fee_amount_and_asset_are_present(db_sessio
     assert saved.fee_amount == Decimal("0.5")
     assert saved.fee_asset == "FAKE"
     assert saved.fee_value_chf == Decimal("100") * Decimal("0.5")
+
+
+def test_sync_persists_fee_included_in_amount_flag(db_session):
+    adapter = FakeAdapter(
+        "main",
+        transactions=[
+            _tx("t1", fee_amount="0.001", fee_asset="FAKE", fee_included_in_amount=True),
+            _tx("t2", fee_amount="0.001", fee_asset="FAKE", fee_included_in_amount=False),
+        ],
+    )
+    sync_all(db_session, [adapter], FakePriceClient(Decimal("100")))
+
+    saved = {tx.external_id: tx for tx in db_session.query(Transaction).all()}
+    assert saved["t1"].fee_included_in_amount is True
+    assert saved["t2"].fee_included_in_amount is False
 
 
 def test_sync_preserves_case_of_long_case_sensitive_asset_identifiers(db_session):

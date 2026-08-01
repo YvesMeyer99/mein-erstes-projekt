@@ -75,6 +75,7 @@ def sync_all(session: Session, adapters: list[TransactionAdapter], price_client)
                         fee_amount=ntx.fee_amount,
                         fee_asset=fee_asset,
                         fee_value_chf=fee_value_chf,
+                        fee_included_in_amount=ntx.fee_included_in_amount,
                         external_id=ntx.external_id,
                         raw_json=ntx.raw_json,
                     )
