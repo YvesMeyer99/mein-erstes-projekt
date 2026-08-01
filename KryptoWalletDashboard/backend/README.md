@@ -103,6 +103,34 @@ als rohe Ganzzahl). Für die Steuererklärung muss der Bezeichner einmalig
 manuell einem bekannten Token zugeordnet werden (z.B. über einen
 Cardano-Explorer wie cardanoscan.io).
 
+## VeChain
+
+Native VET- und VIP-180-Token-Transfers (VeChains ERC-20-Äquivalent,
+inkl. expliziter VTHO-Transfers) werden automatisch erfasst, sobald
+`VECHAIN_ADDRESSES` gesetzt ist. VeChain-Adressen sind fest (dasselbe
+Adressschema wie Ethereum) - keine Adressrotation wie bei Bitcoin/
+Cardano, eine Adresse pro Konto reicht.
+
+**Keine Gebühren-Erfassung:** VeChains Netzwerkgebühr wird in VTHO
+bezahlt - einem komplett anderen Asset als der transferierte Wert (VET
+oder ein VIP-180-Token). Die Gebühr ist daher nie im gemeldeten Betrag
+verflochten (anders als bei Bitcoin). VTHO, das rein als Netzwerkgebühr
+verbraucht wird (nicht explizit transferiert), wird **nicht** erfasst -
+nur explizite VTHO-*Transfers* (z.B. jemand sendet dir VTHO) werden wie
+jeder andere VIP-180-Token erfasst.
+
+### Bekannte Einschränkung: VIP-180-Tokens ohne Symbol/CHF-Kurs, feste Dezimalstellen-Annahme
+
+VIP-180-Token-Transfers werden vollständig erfasst (Menge, Zeitpunkt,
+Richtung), aber ohne lesbaren Namen (nur die Contract-Adresse als roher
+Bezeichner) und ohne CHF-Kurs (analog zur bestehenden Einschränkung bei
+ERC-20/SPL-Tokens). Zusätzlich wird für **alle** VIP-180-Tokens
+pauschal von **18 Dezimalstellen** ausgegangen (wie bei VET/VTHO und
+der überwiegenden Mehrheit der VeChain-Ökosystem-Tokens) - ein seltener
+Token mit abweichender Dezimalstellen-Zahl würde falsch skaliert
+angezeigt. Für die Steuererklärung im Zweifel gegen einen
+VeChain-Explorer wie vechainstats.com verifizieren.
+
 ## Unterstützte EVM-Chains
 
 Seit Phase 2a werden neben Ethereum automatisch fünf weitere EVM-Chains
