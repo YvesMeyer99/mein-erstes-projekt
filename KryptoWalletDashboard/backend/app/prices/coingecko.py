@@ -21,6 +21,8 @@ COINGECKO_ID_MAP = {
     "MATIC": "matic-network",
     "SOL": "solana",
     "ADA": "cardano",
+    "VET": "vechain",
+    "VTHO": "vethor-token",
 }
 
 MAX_RETRIES = 3

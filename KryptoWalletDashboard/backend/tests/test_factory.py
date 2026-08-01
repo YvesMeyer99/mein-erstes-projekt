@@ -355,3 +355,55 @@ def test_no_cardano_adapters_when_none_configured(monkeypatch):
     adapters = build_adapters_from_config()
 
     assert not any(isinstance(a, (CardanoAdapter, CardanoStakeAdapter)) for a in adapters)
+
+
+def test_vechain_adapter_is_added_for_each_configured_address(monkeypatch):
+    from app.adapters.vechain import VeChainAdapter
+    from app.config import WalletConfig
+
+    monkeypatch.setattr(config, "VECHAIN_WALLETS", [WalletConfig(label="main", address="0xabc")])
+    monkeypatch.setattr(config, "CARDANO_WALLETS", [])
+    monkeypatch.setattr(config, "CARDANO_STAKE_WALLETS", [])
+    monkeypatch.setattr(config, "SOLANA_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    vechain_adapters = [a for a in adapters if isinstance(a, VeChainAdapter)]
+    assert len(vechain_adapters) == 1
+    assert vechain_adapters[0].account_label == "main"
+    assert vechain_adapters[0].address == "0xabc"
+
+
+def test_no_vechain_adapters_when_none_configured(monkeypatch):
+    from app.adapters.vechain import VeChainAdapter
+
+    monkeypatch.setattr(config, "VECHAIN_WALLETS", [])
+    monkeypatch.setattr(config, "CARDANO_WALLETS", [])
+    monkeypatch.setattr(config, "CARDANO_STAKE_WALLETS", [])
+    monkeypatch.setattr(config, "SOLANA_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+    monkeypatch.setattr(config, "COINBASE_API_KEY_NAME", "")
+    monkeypatch.setattr(config, "COINBASE_API_PRIVATE_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_KEY", "")
+    monkeypatch.setattr(config, "MEXC_API_SECRET", "")
+    monkeypatch.setattr(config, "BINANCE_API_KEY", "")
+    monkeypatch.setattr(config, "BINANCE_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, VeChainAdapter) for a in adapters)
