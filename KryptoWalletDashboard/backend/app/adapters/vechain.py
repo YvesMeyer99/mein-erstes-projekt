@@ -28,16 +28,35 @@ class VeChainAdapter(TransactionAdapter):
 
     def _fetch_vet_transfers(self, since) -> list[NormalizedTransaction]:
         entries = self._fetch_transfer_logs()
+        occurrence_counts: dict[tuple[str, int], int] = {}
         results: list[NormalizedTransaction] = []
-        index = 0
         for entry in entries:
-            ntx = self._normalize_vet_entry(entry, since, index)
+            # A single tx+clause can contain multiple transfer log entries.
+            # Track an occurrence index per (txID, clauseIndex) pair, over
+            # every row the API returns (before since/self-transfer/zero-
+            # amount filtering), so external_id stays unique per entry and -
+            # critically - stable across repeated syncs regardless of which
+            # `since` value filtered which entries out. Indexing only over
+            # survivors would let the index a given entry gets shift between
+            # calls, causing a new entry to silently collide (and get
+            # deduped away by sync.py) with an already-persisted external_id.
+            key = (entry["meta"]["txID"], entry["meta"]["clauseIndex"])
+            occurrence = occurrence_counts.get(key, 0)
+            occurrence_counts[key] = occurrence + 1
+
+            ntx = self._normalize_vet_entry(entry, since, occurrence)
             if ntx is not None:
                 results.append(ntx)
-                index += 1
         return results
 
     def _fetch_transfer_logs(self) -> list[dict]:
+        # NOTE: pagination is offset-based over a live, desc-ordered feed.
+        # If a new transfer confirms between two page fetches, entries can
+        # shift and a page boundary could skip or duplicate a row. This
+        # mirrors the established "always re-fetch fully, rely on sync.py's
+        # external_id dedup" convention used by other adapters (Binance,
+        # MEXC) rather than cursor-based incremental fetching; only matters
+        # once an address has >256 transfers, so accepted as YAGNI for now.
         all_entries: list[dict] = []
         offset = 0
         while True:

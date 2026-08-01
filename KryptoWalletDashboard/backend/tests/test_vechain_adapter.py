@@ -132,3 +132,38 @@ def test_no_vet_transfers_returns_empty_list():
     results = adapter.fetch_transactions(None)
 
     assert results == []
+
+
+@responses.activate
+def test_external_id_stays_stable_across_syncs_when_since_filters_out_earlier_entries():
+    # Three transfers sharing the same tx+clause, API-order 0, 1, 2 (all
+    # distinct amounts so all three would independently survive
+    # normalization on their own). First call: since=None, all three
+    # present. Second call: since is set so entry 0 (oldest) falls outside
+    # the window and is filtered out - entry 2's external_id must NOT shift
+    # as a result, or sync.py's external_id dedup would silently drop what
+    # looks like a "new" entry while losing track of entry 2's identity.
+    entries = [
+        _transfer_entry(OTHER, ADDR, 1 * 10**18, "0xtx-stable", 0, 1700000000),
+        _transfer_entry(OTHER, ADDR, 2 * 10**18, "0xtx-stable", 0, 1700000100),
+        _transfer_entry(OTHER, ADDR, 3 * 10**18, "0xtx-stable", 0, 1700000200),
+    ]
+
+    _mock_transfer_logs(entries)
+    _mock_event_logs([])
+    adapter = VeChainAdapter(account_label="main", address=ADDR)
+    first_results = adapter.fetch_transactions(None)
+    first_by_amount = {r.amount: r.external_id for r in first_results if r.asset == "VET"}
+    assert len(first_by_amount) == 3
+    entry_2_external_id_first_call = first_by_amount[Decimal("3")]
+
+    since = datetime.fromtimestamp(1700000050, tz=timezone.utc)  # filters out entry 0 only
+    _mock_transfer_logs(entries)
+    _mock_event_logs([])
+    adapter2 = VeChainAdapter(account_label="main", address=ADDR)
+    second_results = adapter2.fetch_transactions(since)
+    second_by_amount = {r.amount: r.external_id for r in second_results if r.asset == "VET"}
+    assert len(second_by_amount) == 2  # entry 0 filtered out
+    entry_2_external_id_second_call = second_by_amount[Decimal("3")]
+
+    assert entry_2_external_id_second_call == entry_2_external_id_first_call
