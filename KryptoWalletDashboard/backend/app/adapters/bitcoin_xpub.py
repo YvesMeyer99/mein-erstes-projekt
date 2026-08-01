@@ -20,6 +20,9 @@ class BitcoinXpubAdapter(TransactionAdapter):
         raw_txs_by_txid: dict[str, dict] = {}
         for address in owned_addresses:
             for tx in fetch_all_pages_for_address(address):
+                # Blockstream returns identical tx JSON regardless of which of the
+                # tx's addresses you queried it from -- last-write-wins here is
+                # safe, just deduplicating by txid, not merging different data.
                 raw_txs_by_txid[tx["txid"]] = tx
 
         results: list[NormalizedTransaction] = []
