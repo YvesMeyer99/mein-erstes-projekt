@@ -3,7 +3,7 @@ from decimal import Decimal
 
 from app.adapters.base import TransactionAdapter
 from app.models import SyncState, Transaction
-from app.prune import prune_stale_accounts
+from app.prune import delete_accounts, list_accounts, prune_stale_accounts
 
 
 class FakeAdapter(TransactionAdapter):
@@ -163,3 +163,131 @@ def test_account_label_is_scoped_per_source_name(db_session):
             "dry_run": False,
         }
     ]
+
+
+def test_list_accounts_includes_transaction_count(db_session):
+    db_session.add(_tx("bitcoin", "ledger", "tx1"))
+    db_session.add(_tx("bitcoin", "ledger", "tx2"))
+    db_session.commit()
+
+    accounts = list_accounts(db_session)
+
+    assert accounts == [
+        {
+            "source_name": "bitcoin",
+            "account_label": "ledger",
+            "transaction_count": 2,
+            "last_synced_at": None,
+            "last_error": None,
+            "is_configured": False,
+        }
+    ]
+
+
+def test_list_accounts_includes_sync_state_info(db_session):
+    db_session.add(_tx("bitcoin", "ledger", "tx1"))
+    state = _sync_state("bitcoin", "ledger")
+    state.last_error = "401 Unauthorized"
+    db_session.add(state)
+    db_session.commit()
+
+    accounts = list_accounts(db_session)
+
+    assert accounts[0]["last_synced_at"] is not None
+    assert accounts[0]["last_error"] == "401 Unauthorized"
+
+
+def test_list_accounts_includes_accounts_with_only_a_sync_state_and_no_transactions(db_session):
+    db_session.add(_sync_state("cardano", "atomic"))
+    db_session.commit()
+
+    accounts = list_accounts(db_session)
+
+    assert accounts == [
+        {
+            "source_name": "cardano",
+            "account_label": "atomic",
+            "transaction_count": 0,
+            "last_synced_at": accounts[0]["last_synced_at"],
+            "last_error": None,
+            "is_configured": False,
+        }
+    ]
+
+
+def test_list_accounts_marks_is_configured_when_adapters_given(db_session):
+    db_session.add(_tx("bitcoin", "ledger", "tx1"))
+    db_session.add(_tx("solana", "old", "tx2"))
+    db_session.commit()
+
+    accounts = {
+        (a["source_name"], a["account_label"]): a
+        for a in list_accounts(db_session, adapters=[FakeAdapter("bitcoin", "ledger")])
+    }
+
+    assert accounts[("bitcoin", "ledger")]["is_configured"] is True
+    assert accounts[("solana", "old")]["is_configured"] is False
+
+
+def test_list_accounts_is_configured_false_for_all_when_no_adapters_given(db_session):
+    db_session.add(_tx("bitcoin", "ledger", "tx1"))
+    db_session.commit()
+
+    accounts = list_accounts(db_session)
+
+    assert accounts[0]["is_configured"] is False
+
+
+def test_list_accounts_returns_empty_list_for_empty_database(db_session):
+    assert list_accounts(db_session) == []
+
+
+def test_delete_accounts_deletes_only_the_given_pairs(db_session):
+    db_session.add(_tx("bitcoin", "ledger", "tx1"))
+    db_session.add(_tx("solana", "gold", "tx2"))
+    db_session.commit()
+
+    reports = delete_accounts(db_session, [("bitcoin", "ledger")])
+
+    remaining = {(tx.source_name, tx.account_label) for tx in db_session.query(Transaction).all()}
+    assert remaining == {("solana", "gold")}
+    assert reports == [
+        {"source_name": "bitcoin", "account_label": "ledger", "deleted_transactions": 1, "dry_run": False}
+    ]
+
+
+def test_delete_accounts_deletes_sync_state_too(db_session):
+    db_session.add(_tx("bitcoin", "ledger", "tx1"))
+    db_session.add(_sync_state("bitcoin", "ledger"))
+    db_session.commit()
+
+    delete_accounts(db_session, [("bitcoin", "ledger")])
+
+    assert db_session.query(SyncState).count() == 0
+
+
+def test_delete_accounts_dry_run_does_not_delete(db_session):
+    db_session.add(_tx("bitcoin", "ledger", "tx1"))
+    db_session.commit()
+
+    reports = delete_accounts(db_session, [("bitcoin", "ledger")], dry_run=True)
+
+    assert db_session.query(Transaction).count() == 1
+    assert reports[0]["dry_run"] is True
+
+
+def test_delete_accounts_still_configured_can_be_deleted_when_explicitly_chosen(db_session):
+    # Unlike prune_stale_accounts, delete_accounts has no notion of "still
+    # configured" -- it deletes exactly what it's told to, which is the
+    # whole point of the targeted-deletion UI (delete a test account even
+    # though it's still in .env).
+    db_session.add(_tx("bitcoin", "ledger", "tx1"))
+    db_session.commit()
+
+    delete_accounts(db_session, [("bitcoin", "ledger")])
+
+    assert db_session.query(Transaction).count() == 0
+
+
+def test_delete_accounts_returns_empty_list_for_empty_pairs(db_session):
+    assert delete_accounts(db_session, []) == []
