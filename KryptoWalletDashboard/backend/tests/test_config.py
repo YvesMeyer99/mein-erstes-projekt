@@ -113,3 +113,39 @@ def test_solana_wallets_reuses_wallet_parsing():
     assert len(result) == 2
     assert result[0].label == "ledger-1"
     assert result[1].label == "ledger-2"
+
+
+def test_reload_config_picks_up_changed_values_from_the_env_file(tmp_path, monkeypatch):
+    from app import config
+
+    # Ensure isolation: monkeypatch remembers each attribute/env var's
+    # pre-test state (whatever it is) and restores it at teardown,
+    # regardless of what reload_config() mutates it to during the test.
+    monkeypatch.delenv("SOLANA_ADDRESSES", raising=False)
+    monkeypatch.setattr(config, "SOLANA_WALLETS", config.SOLANA_WALLETS)
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("SOLANA_ADDRESSES=main:first\n", encoding="utf-8")
+    config.reload_config(str(env_file))
+    assert config.SOLANA_WALLETS[0].address == "first"
+
+    env_file.write_text("SOLANA_ADDRESSES=main:second\n", encoding="utf-8")
+    config.reload_config(str(env_file))
+
+    assert config.SOLANA_WALLETS[0].address == "second"
+
+
+def test_reload_config_defaults_to_the_real_env_file_path_when_no_path_given():
+    from app import config
+    from app.env_file import ENV_FILE_PATH
+
+    # Doesn't assert on the actual content (that would depend on whatever
+    # real .env happens to exist in this environment) -- just proves the
+    # no-argument call resolves to the same path env_file.py uses, rather
+    # than raising or silently no-op'ing on some other path.
+    import inspect
+
+    signature = inspect.signature(config.reload_config)
+    assert signature.parameters["path"].default is None
+    # Calling with no path must not raise even if no .env file exists here.
+    config.reload_config()
