@@ -283,6 +283,38 @@ curl -X POST "http://127.0.0.1:8000/api/prune?dry_run=true"   # nur anzeigen, ni
 curl -X POST http://127.0.0.1:8000/api/prune                  # tatsächlich löschen
 ```
 
+## Konfiguration über die Web-UI
+
+`GET/POST /api/config` erlaubt es, jedes Feld aus `.env.example` (ausser
+`DATABASE_URL`, siehe unten) zu lesen bzw. zu ändern, ohne die Datei von
+Hand zu bearbeiten. Secret-Felder (API-Secrets, Coinbase Private Key)
+werden von `GET /api/config` **immer** als leerer String geliefert - der
+tatsächliche Wert verlässt den Server nie. Beim Speichern (`POST
+/api/config`) gilt: ein leeres Secret-Feld lässt den bestehenden Wert
+unverändert, ein leeres nicht-Secret-Feld löscht den bestehenden Wert
+bewusst. Nach dem Speichern wird die Konfiguration im laufenden Prozess
+sofort neu geladen (`app.config.reload_config()`) - der nächste
+`/api/sync`-Aufruf nutzt bereits die neuen Werte, ganz ohne Neustart.
+Ein unbekannter Feldname oder ein Wert mit Zeilenumbruch wird mit
+`400 Bad Request` abgelehnt (keine Injection zusätzlicher `.env`-Zeilen).
+
+`DATABASE_URL` ist bewusst nicht Teil dieser API: sie wirkt nur beim
+Prozessstart (SQLAlchemy-Engine-Aufbau), ein Live-Wechsel wäre wirkungslos.
+
+## Accounts gezielt löschen
+
+Anders als `/api/prune` (löscht nur, was nicht mehr in der `.env`
+steht) erlaubt `GET /api/accounts` + `POST /api/accounts/delete` das
+gezielte Löschen **beliebiger** Accounts aus der DB, unabhängig vom
+aktuellen `.env`-Stand.
+
+```bash
+curl http://127.0.0.1:8000/api/accounts
+curl -X POST http://127.0.0.1:8000/api/accounts/delete \
+  -H "Content-Type: application/json" \
+  -d '{"accounts": [{"source_name": "bitcoin", "account_label": "old-test"}]}'
+```
+
 ## Tests
 
 ```bash

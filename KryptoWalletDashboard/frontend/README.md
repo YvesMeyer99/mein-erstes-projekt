@@ -18,6 +18,10 @@ Läuft danach auf `http://localhost:5173`.
 - **Transaktionen** (`/transactions`) – Tabelle mit Filtern (Datum,
   Quelle, Typ, Konto), CSV-Export
 - **Sync** (`/sync`) – manueller Sync-Trigger mit Ergebnis pro Quelle
+- **Konfiguration** (`/konfiguration`) – Wallet-Adressen und API-Keys
+  aus der `.env` bearbeiten; Speichern wirkt sofort, ohne Backend-Neustart
+- **Accounts** (`/accounts`) – alle Accounts in der DB, gezielt einzelne
+  löschen (unabhängig von der `.env`)
 
 ## Tests
 
