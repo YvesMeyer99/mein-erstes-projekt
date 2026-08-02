@@ -26,4 +26,14 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: "Transaktionen" })).toHaveClass("bg-gray-900");
     expect(screen.getByRole("link", { name: "Übersicht" })).not.toHaveClass("bg-gray-900");
   });
+
+  it("includes a link to the Konfiguration page", () => {
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Konfiguration" })).toHaveAttribute("href", "/konfiguration");
+  });
 });

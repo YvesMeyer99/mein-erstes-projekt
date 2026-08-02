@@ -4,6 +4,7 @@ const NAV_ITEMS = [
   { to: "/", label: "Übersicht" },
   { to: "/transactions", label: "Transaktionen" },
   { to: "/sync", label: "Sync" },
+  { to: "/konfiguration", label: "Konfiguration" },
 ];
 
 function Sidebar() {

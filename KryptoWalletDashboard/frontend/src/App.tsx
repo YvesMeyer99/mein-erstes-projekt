@@ -3,6 +3,7 @@ import Sidebar from "./components/Sidebar";
 import Overview from "./pages/Overview";
 import Transactions from "./pages/Transactions";
 import SyncPage from "./pages/Sync";
+import Konfiguration from "./pages/Konfiguration";
 
 function App() {
   return (
@@ -13,6 +14,7 @@ function App() {
           <Route path="/" element={<Overview />} />
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/sync" element={<SyncPage />} />
+          <Route path="/konfiguration" element={<Konfiguration />} />
         </Routes>
       </main>
     </div>
