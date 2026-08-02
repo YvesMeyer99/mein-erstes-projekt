@@ -207,6 +207,20 @@ def test_get_current_prices_chf_returns_empty_dict_on_request_failure():
     assert prices == {}
 
 
+@responses.activate
+def test_get_current_prices_chf_returns_empty_dict_on_malformed_json_body():
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/simple/price",
+        body="<html>not json</html>",
+        status=200,
+    )
+
+    prices = CoinGeckoPriceClient().get_current_prices_chf(["BTC"])
+
+    assert prices == {}
+
+
 def test_get_current_prices_chf_returns_empty_dict_for_empty_input():
     prices = CoinGeckoPriceClient().get_current_prices_chf([])
 

@@ -96,7 +96,10 @@ class CoinGeckoPriceClient:
             )
             response.raise_for_status()
             data = response.json()
-        except requests.RequestException:
+        except (requests.RequestException, ValueError):
+            # ValueError covers response.json() failing on a non-JSON body
+            # (e.g. an HTML error page from an upstream proxy) -- same
+            # graceful-degradation contract as a network-level failure.
             return {}
 
         result = {}
