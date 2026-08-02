@@ -4,9 +4,9 @@ import os
 
 from dotenv import load_dotenv
 
-from app.env_file import ENV_FILE_PATH
+from app import env_file
 
-load_dotenv(ENV_FILE_PATH)
+load_dotenv(env_file.ENV_FILE_PATH)
 
 
 @dataclass(frozen=True)
@@ -122,6 +122,16 @@ def reload_config(path: str | None = None) -> None:
     DATABASE_URL is deliberately not touched here -- see its comment
     above; reloading it would silently do nothing since the SQLAlchemy
     engine is already built from whatever it was at process start.
+
+    `path` defaults to `env_file.ENV_FILE_PATH`, looked up as a live
+    attribute on the `env_file` module (`import app.env_file as env_file`
+    above, not `from app.env_file import ENV_FILE_PATH`) rather than a
+    name copied into this module's namespace at import time. A copied
+    name would freeze the value as of config.py's own import, so any
+    later `monkeypatch.setattr("app.env_file.ENV_FILE_PATH", ...)` --
+    exactly how tests point this whole module at a temp file -- would
+    have no effect here even though it correctly redirects
+    read_config_values/write_config_values in env_file.py itself.
     """
-    load_dotenv(path or ENV_FILE_PATH, override=True)
+    load_dotenv(path or env_file.ENV_FILE_PATH, override=True)
     _load_all_from_env()

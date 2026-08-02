@@ -153,18 +153,16 @@ def test_reload_config_picks_up_changed_values_from_the_env_file(tmp_path, monke
 
 
 def test_reload_config_defaults_to_the_real_env_file_path_when_no_path_given(tmp_path, monkeypatch):
-    from app import config
+    from app import config, env_file
 
-    # Point ENV_FILE_PATH at a file that doesn't exist so this test never
-    # touches the real .env or leaks real config values into other tests.
-    # This IS a case where monkeypatch.setattr's teardown-restore works
-    # correctly (unlike the delenv pitfall above): config.ENV_FILE_PATH
-    # already exists as an attribute before this call, so monkeypatch
-    # captures its current value and restores it after the test.
-    monkeypatch.setattr(config, "ENV_FILE_PATH", str(tmp_path / "does-not-exist.env"))
+    # Point env_file.ENV_FILE_PATH (the single source of truth -- config.py
+    # no longer keeps its own copy of the name, see the regression test
+    # below) at a file that doesn't exist so this test never touches the
+    # real .env or leaks real config values into other tests.
+    monkeypatch.setattr(env_file, "ENV_FILE_PATH", str(tmp_path / "does-not-exist.env"))
 
     # Doesn't assert on any actual content -- just proves the no-argument
-    # call resolves to config.ENV_FILE_PATH rather than raising or
+    # call resolves to env_file.ENV_FILE_PATH rather than raising or
     # silently no-op'ing on some other path.
     import inspect
 
@@ -172,3 +170,43 @@ def test_reload_config_defaults_to_the_real_env_file_path_when_no_path_given(tmp
     assert signature.parameters["path"].default is None
     # Calling with no path must not raise even though the file doesn't exist.
     config.reload_config()
+
+
+def test_reload_config_with_no_path_respects_a_monkeypatched_env_file_path(tmp_path, monkeypatch):
+    """Regression test for the bug where config.py did
+    `from app.env_file import ENV_FILE_PATH`, copying the value into its
+    own namespace once at import time. reload_config(path=None) then fell
+    back to that frozen copy instead of a live attribute lookup on the
+    env_file module, so monkeypatching `app.env_file.ENV_FILE_PATH` --
+    exactly what tests/test_api.py's config endpoint tests do, and the
+    whole point of resolving `path` dynamically in the first place -- had
+    *zero* effect on reload_config(), which would silently reload from
+    whatever the real default .env path was instead of the intended file.
+
+    This must assert on actual reloaded content (not just "doesn't
+    raise") to be a real check: with the bug present, this test fails
+    because SOLANA_WALLETS ends up empty (or reflecting the real .env)
+    rather than "from-monkeypatched-path".
+    """
+    import os
+
+    from app import config, env_file
+
+    original_env_value = os.environ.get("SOLANA_ADDRESSES")
+    original_solana_wallets = config.SOLANA_WALLETS
+    try:
+        os.environ.pop("SOLANA_ADDRESSES", None)
+
+        patched_env_file = tmp_path / ".env"
+        patched_env_file.write_text("SOLANA_ADDRESSES=main:from-monkeypatched-path\n", encoding="utf-8")
+        monkeypatch.setattr(env_file, "ENV_FILE_PATH", str(patched_env_file))
+
+        config.reload_config()  # no explicit path -- must resolve via env_file.ENV_FILE_PATH
+
+        assert config.SOLANA_WALLETS[0].address == "from-monkeypatched-path"
+    finally:
+        if original_env_value is None:
+            os.environ.pop("SOLANA_ADDRESSES", None)
+        else:
+            os.environ["SOLANA_ADDRESSES"] = original_env_value
+        config.SOLANA_WALLETS = original_solana_wallets

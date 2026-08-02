@@ -1,4 +1,6 @@
-from app.env_file import CONFIG_FIELDS, read_config_values, write_config_values
+import pytest
+
+from app.env_file import CONFIG_FIELDS, InvalidConfigValueError, read_config_values, write_config_values
 
 
 def _write(path, content):
@@ -120,6 +122,56 @@ def test_write_config_values_does_nothing_for_empty_updates_dict(tmp_path):
     write_config_values({}, str(env_file))
 
     assert env_file.read_text(encoding="utf-8") == "SOLANA_ADDRESSES=main:abc\n"
+
+
+def test_write_config_values_rejects_unknown_field_name(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "SOLANA_ADDRESSES=main:abc\n")
+
+    with pytest.raises(InvalidConfigValueError):
+        write_config_values({"NOT_A_REAL_FIELD": "value"}, str(env_file))
+
+    # Nothing must have been written -- validation happens before any I/O.
+    assert env_file.read_text(encoding="utf-8") == "SOLANA_ADDRESSES=main:abc\n"
+
+
+def test_write_config_values_rejects_value_containing_newline(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "KRAKEN_API_KEY=real-key\n")
+
+    with pytest.raises(InvalidConfigValueError):
+        write_config_values(
+            {"BITCOIN_ADDRESSES": "x\nKRAKEN_API_KEY=injected"}, str(env_file)
+        )
+
+    content = env_file.read_text(encoding="utf-8")
+    assert content == "KRAKEN_API_KEY=real-key\n"
+    assert "injected" not in content
+
+
+def test_write_config_values_rejects_value_containing_carriage_return(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "SOLANA_ADDRESSES=main:abc\n")
+
+    with pytest.raises(InvalidConfigValueError):
+        write_config_values({"SOLANA_ADDRESSES": "main:abc\rEVIL=1"}, str(env_file))
+
+    assert env_file.read_text(encoding="utf-8") == "SOLANA_ADDRESSES=main:abc\n"
+
+
+def test_write_config_values_still_accepts_a_normal_multi_field_update(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "SOLANA_ADDRESSES=old\nKRAKEN_API_KEY=old-key\n")
+
+    write_config_values(
+        {"SOLANA_ADDRESSES": "main:new", "KRAKEN_API_KEY": "new-key", "VECHAIN_ADDRESSES": "main:0xabc"},
+        str(env_file),
+    )
+
+    content = env_file.read_text(encoding="utf-8")
+    assert "SOLANA_ADDRESSES=main:new" in content
+    assert "KRAKEN_API_KEY=new-key" in content
+    assert "VECHAIN_ADDRESSES=main:0xabc" in content
 
 
 def test_config_fields_all_have_a_name_section_and_label():

@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from fastapi import Depends, FastAPI, Response
+from fastapi import Depends, FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -9,7 +9,7 @@ from app.adapters.factory import build_adapters_from_config
 from app.config import reload_config
 from app.csv_export import export_csv
 from app.db import SessionLocal
-from app.env_file import CONFIG_FIELDS, read_config_values, write_config_values
+from app.env_file import CONFIG_FIELDS, InvalidConfigValueError, read_config_values, write_config_values
 from app.models import Transaction
 from app.portfolio import compute_portfolio
 from app.prices.coingecko import CoinGeckoPriceClient
@@ -78,7 +78,10 @@ def api_get_config():
 
 @app.post("/api/config")
 def api_post_config(updates: dict[str, str]):
-    write_config_values(updates)
+    try:
+        write_config_values(updates)
+    except InvalidConfigValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     reload_config()
     return {"status": "ok"}
 

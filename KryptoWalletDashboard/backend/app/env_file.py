@@ -41,6 +41,25 @@ CONFIG_FIELDS: list[ConfigField] = [
 ]
 
 _SECRET_FIELD_NAMES = {f.name for f in CONFIG_FIELDS if f.is_secret}
+_KNOWN_FIELD_NAMES = {f.name for f in CONFIG_FIELDS}
+
+
+class InvalidConfigValueError(ValueError):
+    """Raised by write_config_values for an update that must never be
+    written to the .env file as-is: an unknown field name (not part of
+    CONFIG_FIELDS, the single source of truth for what this app exposes),
+    or a value containing a literal newline / carriage-return character.
+
+    A literal newline in a value would let write_config_values' line-based
+    .env writer be tricked into emitting an extra "line" -- effectively
+    letting one field's submitted value inject an arbitrary, unrelated
+    key=value assignment (including overwriting a *different* field, such
+    as a secret) into the file. Multi-line values (e.g. the Coinbase PEM
+    private key) are always represented in .env with escaped `\\n`
+    *sequences*, never real newlines -- see app.config.normalize_pem_env_value,
+    which converts them back on read. So rejecting a raw newline here
+    doesn't break any legitimate value.
+    """
 
 
 def _read_raw_values(path: str) -> dict[str, str]:
@@ -94,7 +113,19 @@ def write_config_values(updates: dict[str, str], path: str | None = None) -> Non
     See `read_config_values` above for why `path` defaults to `None` and
     is resolved against the current `ENV_FILE_PATH` inside the function
     body instead of as a literal default value.
+
+    Raises InvalidConfigValueError -- before touching the file -- for any
+    update whose key isn't a known CONFIG_FIELDS name, or whose value
+    contains a literal "\\n" or "\\r".
     """
+    for name, value in updates.items():
+        if name not in _KNOWN_FIELD_NAMES:
+            raise InvalidConfigValueError(f"Unknown config field: {name!r}")
+        if "\n" in value or "\r" in value:
+            raise InvalidConfigValueError(
+                f"Value for {name!r} must not contain a newline or carriage-return character"
+            )
+
     path = path if path is not None else ENV_FILE_PATH
     effective_updates = {
         name: value

@@ -417,6 +417,39 @@ def test_config_post_endpoint_leaves_secret_untouched_when_empty(db_session, tmp
     app.dependency_overrides.clear()
 
 
+def test_config_post_endpoint_rejects_value_with_injected_newline(db_session, tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("KRAKEN_API_KEY=real-key\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.post(
+        "/api/config",
+        json={"BITCOIN_ADDRESSES": "x\nKRAKEN_API_KEY=injected"},
+    )
+
+    assert response.status_code == 400
+    content = env_file.read_text(encoding="utf-8")
+    assert content == "KRAKEN_API_KEY=real-key\n"
+    assert "injected" not in content
+    app.dependency_overrides.clear()
+
+
+def test_config_post_endpoint_rejects_unknown_field_name(db_session, tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("SOLANA_ADDRESSES=main:abc\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.post("/api/config", json={"DATABASE_URL": "sqlite:///evil.db"})
+
+    assert response.status_code == 400
+    content = env_file.read_text(encoding="utf-8")
+    assert content == "SOLANA_ADDRESSES=main:abc\n"
+    assert "DATABASE_URL" not in content
+    app.dependency_overrides.clear()
+
+
 def test_accounts_endpoint_lists_accounts_with_configured_flag(db_session):
     db_session.add(
         Transaction(
