@@ -116,36 +116,59 @@ def test_solana_wallets_reuses_wallet_parsing():
 
 
 def test_reload_config_picks_up_changed_values_from_the_env_file(tmp_path, monkeypatch):
+    import os
+
     from app import config
 
-    # Ensure isolation: monkeypatch remembers each attribute/env var's
-    # pre-test state (whatever it is) and restores it at teardown,
-    # regardless of what reload_config() mutates it to during the test.
-    monkeypatch.delenv("SOLANA_ADDRESSES", raising=False)
-    monkeypatch.setattr(config, "SOLANA_WALLETS", config.SOLANA_WALLETS)
+    # NOTE: monkeypatch.delenv("SOLANA_ADDRESSES", raising=False) is NOT
+    # sufficient here -- monkeypatch only registers a teardown-restore
+    # action for a key it deletes if that key already existed at call
+    # time. In a clean test env SOLANA_ADDRESSES is typically already
+    # absent, so delenv would be a no-op that registers nothing, and
+    # reload_config()'s later load_dotenv(..., override=True) call would
+    # then set os.environ["SOLANA_ADDRESSES"] with nothing to clean it up
+    # afterwards. Likewise monkeypatch.setattr(config, "SOLANA_WALLETS",
+    # config.SOLANA_WALLETS) only snapshots the CURRENT value to restore
+    # -- it does not protect against reload_config() reassigning the
+    # attribute again later in the test. So we snapshot and restore both
+    # os.environ and config.SOLANA_WALLETS by hand.
+    original_env_value = os.environ.get("SOLANA_ADDRESSES")
+    original_solana_wallets = config.SOLANA_WALLETS
+    try:
+        env_file = tmp_path / ".env"
+        env_file.write_text("SOLANA_ADDRESSES=main:first\n", encoding="utf-8")
+        config.reload_config(str(env_file))
+        assert config.SOLANA_WALLETS[0].address == "first"
 
-    env_file = tmp_path / ".env"
-    env_file.write_text("SOLANA_ADDRESSES=main:first\n", encoding="utf-8")
-    config.reload_config(str(env_file))
-    assert config.SOLANA_WALLETS[0].address == "first"
+        env_file.write_text("SOLANA_ADDRESSES=main:second\n", encoding="utf-8")
+        config.reload_config(str(env_file))
 
-    env_file.write_text("SOLANA_ADDRESSES=main:second\n", encoding="utf-8")
-    config.reload_config(str(env_file))
+        assert config.SOLANA_WALLETS[0].address == "second"
+    finally:
+        if original_env_value is None:
+            os.environ.pop("SOLANA_ADDRESSES", None)
+        else:
+            os.environ["SOLANA_ADDRESSES"] = original_env_value
+        config.SOLANA_WALLETS = original_solana_wallets
 
-    assert config.SOLANA_WALLETS[0].address == "second"
 
-
-def test_reload_config_defaults_to_the_real_env_file_path_when_no_path_given():
+def test_reload_config_defaults_to_the_real_env_file_path_when_no_path_given(tmp_path, monkeypatch):
     from app import config
-    from app.env_file import ENV_FILE_PATH
 
-    # Doesn't assert on the actual content (that would depend on whatever
-    # real .env happens to exist in this environment) -- just proves the
-    # no-argument call resolves to the same path env_file.py uses, rather
-    # than raising or silently no-op'ing on some other path.
+    # Point ENV_FILE_PATH at a file that doesn't exist so this test never
+    # touches the real .env or leaks real config values into other tests.
+    # This IS a case where monkeypatch.setattr's teardown-restore works
+    # correctly (unlike the delenv pitfall above): config.ENV_FILE_PATH
+    # already exists as an attribute before this call, so monkeypatch
+    # captures its current value and restores it after the test.
+    monkeypatch.setattr(config, "ENV_FILE_PATH", str(tmp_path / "does-not-exist.env"))
+
+    # Doesn't assert on any actual content -- just proves the no-argument
+    # call resolves to config.ENV_FILE_PATH rather than raising or
+    # silently no-op'ing on some other path.
     import inspect
 
     signature = inspect.signature(config.reload_config)
     assert signature.parameters["path"].default is None
-    # Calling with no path must not raise even if no .env file exists here.
+    # Calling with no path must not raise even though the file doesn't exist.
     config.reload_config()
