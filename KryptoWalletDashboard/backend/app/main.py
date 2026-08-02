@@ -57,8 +57,11 @@ def api_prune(
 
 
 @app.get("/api/portfolio", response_model=list[PortfolioEntryOut])
-def api_portfolio(session: Session = Depends(get_session)):
-    return compute_portfolio(session)
+def api_portfolio(
+    session: Session = Depends(get_session),
+    price_client=Depends(get_price_client),
+):
+    return compute_portfolio(session, price_client=price_client)
 
 
 def _as_utc(dt: datetime | None) -> datetime | None:

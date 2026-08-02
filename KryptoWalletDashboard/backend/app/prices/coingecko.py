@@ -68,6 +68,44 @@ class CoinGeckoPriceClient:
         price = response.json().get("market_data", {}).get("current_price", {}).get("chf")
         return Decimal(str(price)) if price is not None else None
 
+    def get_current_prices_chf(self, assets: list[str]) -> dict[str, Decimal]:
+        """Batched *live* price lookup via CoinGecko's /simple/price, for
+        today's portfolio valuation -- unlike get_price_chf, which looks up
+        a specific historical date for pricing individual transactions.
+
+        Returns a dict keyed by the input asset symbol (not the CoinGecko
+        id), containing only assets that both have a COINGECKO_ID_MAP entry
+        and a current price in the response. Missing/unmapped assets are
+        simply absent, not an error -- same for any request failure (this
+        is called from a read-only GET path, where a transient CoinGecko
+        outage must fall back to stale prices rather than break the page).
+        """
+        coingecko_id_by_asset = {
+            asset: COINGECKO_ID_MAP[normalize_asset(asset)]
+            for asset in assets
+            if normalize_asset(asset) in COINGECKO_ID_MAP
+        }
+        if not coingecko_id_by_asset:
+            return {}
+
+        try:
+            response = requests.get(
+                f"{self.BASE_URL}/simple/price",
+                params={"ids": ",".join(sorted(set(coingecko_id_by_asset.values()))), "vs_currencies": "chf"},
+                timeout=10,
+            )
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException:
+            return {}
+
+        result = {}
+        for asset, coingecko_id in coingecko_id_by_asset.items():
+            price = data.get(coingecko_id, {}).get("chf")
+            if price is not None:
+                result[asset] = Decimal(str(price))
+        return result
+
 
 def get_or_fetch_price_chf(
     session: Session, client: CoinGeckoPriceClient, asset: str, on_date: date

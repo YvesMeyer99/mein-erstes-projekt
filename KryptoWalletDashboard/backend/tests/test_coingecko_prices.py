@@ -148,6 +148,72 @@ def test_client_resolves_bnb_price():
 
 
 @responses.activate
+def test_get_current_prices_chf_batches_multiple_assets_in_one_call():
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/simple/price",
+        json={"bitcoin": {"chf": "50000"}, "solana": {"chf": "150.5"}},
+        status=200,
+    )
+
+    client = CoinGeckoPriceClient()
+    prices = client.get_current_prices_chf(["BTC", "SOL"])
+
+    assert prices == {"BTC": Decimal("50000"), "SOL": Decimal("150.5")}
+    assert len(responses.calls) == 1
+    request_ids = responses.calls[0].request.params["ids"]
+    assert set(request_ids.split(",")) == {"bitcoin", "solana"}
+
+
+@responses.activate
+def test_get_current_prices_chf_skips_unmapped_assets_without_calling_api():
+    prices = CoinGeckoPriceClient().get_current_prices_chf(["NOT-A-COIN"])
+
+    assert prices == {}
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_get_current_prices_chf_omits_assets_missing_from_response():
+    # CoinGecko simply omits an id from the response body if it has no
+    # current price for it (rather than an error) -- that asset must be
+    # absent from the result dict too, not raise or default to something.
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/simple/price",
+        json={"bitcoin": {"chf": "50000"}},
+        status=200,
+    )
+
+    prices = CoinGeckoPriceClient().get_current_prices_chf(["BTC", "SOL"])
+
+    assert prices == {"BTC": Decimal("50000")}
+
+
+@responses.activate
+def test_get_current_prices_chf_returns_empty_dict_on_request_failure():
+    # Unlike get_price_chf (used at sync time, where a hard failure should
+    # surface via the adapter's error report), this is called from the
+    # read-only /api/portfolio GET path -- a transient CoinGecko outage
+    # must not break the whole page, just fall back to stale prices.
+    responses.add(
+        responses.GET,
+        "https://api.coingecko.com/api/v3/simple/price",
+        status=500,
+    )
+
+    prices = CoinGeckoPriceClient().get_current_prices_chf(["BTC"])
+
+    assert prices == {}
+
+
+def test_get_current_prices_chf_returns_empty_dict_for_empty_input():
+    prices = CoinGeckoPriceClient().get_current_prices_chf([])
+
+    assert prices == {}
+
+
+@responses.activate
 def test_client_resolves_matic_price():
     responses.add(
         responses.GET,

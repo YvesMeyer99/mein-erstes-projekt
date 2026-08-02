@@ -7,6 +7,14 @@ from app.main import app, get_adapters, get_price_client, get_session
 from app.models import Transaction
 
 
+class StubPriceClient:
+    def __init__(self, prices=None):
+        self._prices = prices or {}
+
+    def get_current_prices_chf(self, assets):
+        return {asset: price for asset, price in self._prices.items() if asset in assets}
+
+
 def _client(db_session, adapters=None, price_client=None):
     app.dependency_overrides[get_session] = lambda: db_session
     if adapters is not None:
@@ -233,12 +241,38 @@ def test_portfolio_endpoint_reflects_transactions(db_session):
     )
     db_session.commit()
 
-    client = _client(db_session)
+    client = _client(db_session, price_client=StubPriceClient())
     response = client.get("/api/portfolio")
     body = response.json()
     assert len(body) == 1
     assert body[0]["asset"] == "BTC"
     assert body[0]["amount"] == "1"
+    app.dependency_overrides.clear()
+
+
+def test_portfolio_endpoint_uses_live_price_when_available(db_session):
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="main",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            price_chf=Decimal("50000"),
+            value_chf=Decimal("50000"),
+            external_id="id1",
+            raw_json="{}",
+        )
+    )
+    db_session.commit()
+
+    client = _client(db_session, price_client=StubPriceClient({"BTC": Decimal("80000")}))
+    response = client.get("/api/portfolio")
+    body = response.json()
+    assert body[0]["price_chf"] == "80000"
+    assert body[0]["value_chf"] == "80000"
     app.dependency_overrides.clear()
 
 

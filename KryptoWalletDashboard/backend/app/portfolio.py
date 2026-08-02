@@ -9,7 +9,7 @@ INFLOW_TYPES = {"transfer_in", "staking_reward", "buy"}
 OUTFLOW_TYPES = {"transfer_out", "fee", "sell"}
 
 
-def compute_portfolio(session: Session) -> list[dict]:
+def compute_portfolio(session: Session, price_client=None) -> list[dict]:
     rows = session.execute(select(Transaction).order_by(Transaction.timestamp)).scalars().all()
 
     balances: dict[str, Decimal] = {}
@@ -47,11 +47,25 @@ def compute_portfolio(session: Session) -> list[dict]:
     # more of that asset was spent (e.g. on fees) than was ever recorded as
     # received, which usually signals an incomplete sync history for that
     # asset rather than a bug in this calculation.
+    held_assets = [asset for asset, amount in balances.items() if amount != 0]
+
+    # Without this, the reported total value used whatever price was
+    # recorded on that asset's LAST transaction -- which can be months
+    # stale if you haven't traded it recently, silently mis-stating today's
+    # actual portfolio value. price_client is optional (None keeps the old
+    # last-transaction-price behavior, e.g. for callers that can't reach
+    # the network) and any asset it doesn't return a price for -- no
+    # COINGECKO_ID_MAP entry, or a transient API failure -- falls back to
+    # the same last-transaction price as before.
+    current_prices: dict[str, Decimal] = {}
+    if price_client is not None and held_assets:
+        current_prices = price_client.get_current_prices_chf(held_assets)
+
     portfolio = []
     for asset, amount in balances.items():
         if amount == 0:
             continue
-        price = latest_price_per_unit.get(asset)
+        price = current_prices.get(asset, latest_price_per_unit.get(asset))
         portfolio.append(
             {
                 "asset": asset,

@@ -130,6 +130,97 @@ def test_fee_value_chf_price_source_still_applies_when_fee_included_in_amount(db
     assert portfolio["BTC"]["price_chf"] == Decimal("5") / Decimal("0.0001")
 
 
+class FakePriceClient:
+    def __init__(self, prices: dict[str, Decimal]):
+        self._prices = prices
+
+    def get_current_prices_chf(self, assets):
+        return {asset: price for asset, price in self._prices.items() if asset in assets}
+
+
+def test_uses_current_price_over_last_transaction_price_when_available(db_session):
+    # Regression test for the reported bug: the Uebersicht total used the
+    # PRICE FROM THE LAST TRANSACTION for an asset (which can be stale by
+    # months if you haven't traded it recently) instead of today's actual
+    # market price, silently understating or overstating the total value.
+    db_session.add(
+        _tx(
+            external_id="1",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("2"),
+            price_chf=Decimal("50000"),
+            value_chf=Decimal("100000"),
+        )
+    )
+    db_session.commit()
+
+    portfolio = {
+        row["asset"]: row
+        for row in compute_portfolio(db_session, price_client=FakePriceClient({"BTC": Decimal("80000")}))
+    }
+
+    assert portfolio["BTC"]["price_chf"] == Decimal("80000")
+    assert portfolio["BTC"]["value_chf"] == Decimal("160000")
+
+
+def test_falls_back_to_last_transaction_price_when_current_price_unavailable(db_session):
+    db_session.add(
+        _tx(
+            external_id="1",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            price_chf=Decimal("50000"),
+            value_chf=Decimal("50000"),
+        )
+    )
+    db_session.commit()
+
+    portfolio = {
+        row["asset"]: row for row in compute_portfolio(db_session, price_client=FakePriceClient({}))
+    }
+
+    assert portfolio["BTC"]["price_chf"] == Decimal("50000")
+
+
+def test_no_price_client_keeps_last_transaction_price_behavior(db_session):
+    # Backward compatibility: every existing call site/test that doesn't
+    # pass a price_client must behave exactly as before this feature.
+    db_session.add(
+        _tx(
+            external_id="1",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            price_chf=Decimal("50000"),
+            value_chf=Decimal("50000"),
+        )
+    )
+    db_session.commit()
+
+    portfolio = {row["asset"]: row for row in compute_portfolio(db_session)}
+
+    assert portfolio["BTC"]["price_chf"] == Decimal("50000")
+
+
+def test_current_price_only_requested_for_assets_with_nonzero_balance(db_session):
+    db_session.add(_tx(external_id="1", tx_type="transfer_in", asset="BTC", amount=Decimal("1")))
+    db_session.add(_tx(external_id="2", tx_type="transfer_out", asset="BTC", amount=Decimal("1")))
+    db_session.commit()
+
+    requested = []
+
+    class RecordingPriceClient:
+        def get_current_prices_chf(self, assets):
+            requested.extend(assets)
+            return {}
+
+    compute_portfolio(db_session, price_client=RecordingPriceClient())
+
+    assert requested == []
+
+
 def test_missing_price_yields_none_value(db_session):
     db_session.add(_tx(external_id="1", tx_type="transfer_in", amount=Decimal("1"), price_chf=None, value_chf=None))
     db_session.commit()
