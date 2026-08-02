@@ -265,6 +265,24 @@ beschränkt - andere Origins werden vom Backend nicht akzeptiert.
 3. `curl http://127.0.0.1:8000/api/transactions` - alle Transaktionen
 4. `curl http://127.0.0.1:8000/api/export -o test.csv` - CSV-Export prüfen
 
+## Alte Accounts aus der DB entfernen
+
+Wird ein Wallet/Account aus der `.env` entfernt oder umbenannt, bleiben
+seine bereits synchronisierten Transaktionen sonst dauerhaft in der DB
+liegen. `POST /api/prune` löscht alle Transaktionen (und den Sync-Status)
+für jede `(Quelle, Account-Label)`-Kombination, die aktuell **nicht**
+mehr in der `.env` konfiguriert ist - erkannt wird das anhand des
+Account-Labels, nicht der Adresse (ein Label umzubenennen zählt als
+Entfernen + Neuanlegen; die Adresse hinter einem gleichbleibenden Label
+zu ändern wird nicht erkannt). Der Preis-Cache (`PriceCache`) ist davon
+nicht betroffen, da er nur nach Asset/Datum indiziert ist, nicht nach
+Account.
+
+```bash
+curl -X POST "http://127.0.0.1:8000/api/prune?dry_run=true"   # nur anzeigen, nichts löschen
+curl -X POST http://127.0.0.1:8000/api/prune                  # tatsächlich löschen
+```
+
 ## Tests
 
 ```bash
@@ -281,6 +299,19 @@ historische CHF-Preise zu Transaktionen zu ermitteln. Auf dem kostenlosen
 CoinGecko-Tier liefert dieser Endpoint zuverlässig nur die Preishistorie der
 letzten ca. 365 Tage; für ältere Daten kommt teils keine `market_data` zurück
 oder die Anfrage schlägt fehl (z.B. 401).
+
+**Übersicht-Gesamtwert nutzt den aktuellen Marktpreis, nicht den
+Transaktionspreis:** einzelne Transaktionen (Tabelle, CSV-Export) zeigen
+weiterhin den historischen Preis zum jeweiligen Transaktionszeitpunkt -
+das ist für die Steuererklärung korrekt. Der Gesamtwert auf der
+Übersicht-Seite bewertet die aktuell gehaltene Menge pro Asset dagegen
+mit dem **heutigen** Kurs (`/simple/price`, gebündelt in einem Request
+für alle gehaltenen Assets), nicht mit dem Preis der letzten
+Transaktion - sonst würde der angezeigte Gesamtwert für ein länger nicht
+angefasstes Asset (z.B. seit Monaten keine BTC-Transaktion) den
+Kursverlauf seitdem komplett ignorieren. Ist der aktuelle Kurs nicht
+abrufbar (unbekanntes Asset oder CoinGecko kurzzeitig nicht erreichbar),
+wird automatisch auf den letzten Transaktionspreis zurückgefallen.
 
 Der Code fängt das ab und liefert in diesem Fall einfach `None`, ohne
 abzustürzen oder den Cache zu verunreinigen. Das bedeutet aber: Transaktionen,
