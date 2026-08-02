@@ -81,6 +81,7 @@ function Konfiguration() {
                 <input
                   id={field.name}
                   type={field.is_secret ? "password" : "text"}
+                  autoComplete={field.is_secret ? "new-password" : "off"}
                   value={values[field.name] ?? ""}
                   placeholder={field.is_secret ? "•••• (unverändert lassen, um bestehenden Wert zu behalten)" : field.hint}
                   onChange={(e) => setValues((prev) => ({ ...prev, [field.name]: e.target.value }))}

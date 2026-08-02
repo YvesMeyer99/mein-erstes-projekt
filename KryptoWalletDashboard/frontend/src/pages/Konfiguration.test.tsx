@@ -42,6 +42,15 @@ describe("Konfiguration", () => {
     expect(secretInput.value).toBe("");
   });
 
+  it("marks secret inputs with autoComplete=new-password to prevent browser credential autofill", async () => {
+    vi.spyOn(client, "fetchConfig").mockResolvedValue({ fields: FIELDS });
+
+    render(<Konfiguration />);
+
+    const secretInput = (await screen.findByLabelText("API-Secret")) as HTMLInputElement;
+    expect(secretInput.autocomplete).toBe("new-password");
+  });
+
   it("saves the current form values when the save button is clicked", async () => {
     vi.spyOn(client, "fetchConfig").mockResolvedValue({ fields: FIELDS });
     const saveSpy = vi.spyOn(client, "saveConfig").mockResolvedValue(undefined);
