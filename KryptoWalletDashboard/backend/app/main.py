@@ -11,6 +11,7 @@ from app.db import SessionLocal
 from app.models import Transaction
 from app.portfolio import compute_portfolio
 from app.prices.coingecko import CoinGeckoPriceClient
+from app.prune import prune_stale_accounts
 from app.schemas import PortfolioEntryOut, TransactionOut
 from app.sync import sync_all
 
@@ -44,6 +45,15 @@ def api_sync(
     price_client=Depends(get_price_client),
 ):
     return {"results": sync_all(session, adapters, price_client)}
+
+
+@app.post("/api/prune")
+def api_prune(
+    dry_run: bool = False,
+    session: Session = Depends(get_session),
+    adapters=Depends(get_adapters),
+):
+    return {"results": prune_stale_accounts(session, adapters, dry_run=dry_run)}
 
 
 @app.get("/api/portfolio", response_model=list[PortfolioEntryOut])

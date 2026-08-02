@@ -282,3 +282,55 @@ def test_sync_endpoint_runs_adapters_and_reports_results(db_session):
         "results": [{"source_name": "fake", "account_label": "main", "status": "ok", "new_transactions": 0}]
     }
     app.dependency_overrides.clear()
+
+
+def test_prune_endpoint_deletes_unconfigured_accounts(db_session):
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="old-ledger",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="id1",
+            raw_json="{}",
+        )
+    )
+    db_session.commit()
+
+    client = _client(db_session, adapters=[])
+    response = client.post("/api/prune")
+    assert response.status_code == 200
+    assert response.json() == {
+        "results": [
+            {"source_name": "bitcoin", "account_label": "old-ledger", "deleted_transactions": 1, "dry_run": False}
+        ]
+    }
+    assert db_session.query(Transaction).count() == 0
+    app.dependency_overrides.clear()
+
+
+def test_prune_endpoint_supports_dry_run_query_param(db_session):
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="old-ledger",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="id1",
+            raw_json="{}",
+        )
+    )
+    db_session.commit()
+
+    client = _client(db_session, adapters=[])
+    response = client.post("/api/prune", params={"dry_run": "true"})
+    assert response.status_code == 200
+    assert response.json()["results"][0]["dry_run"] is True
+    assert db_session.query(Transaction).count() == 1
+    app.dependency_overrides.clear()
