@@ -36,4 +36,14 @@ describe("Sidebar", () => {
 
     expect(screen.getByRole("link", { name: "Konfiguration" })).toHaveAttribute("href", "/konfiguration");
   });
+
+  it("includes a link to the Accounts page", () => {
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: "Accounts" })).toHaveAttribute("href", "/accounts");
+  });
 });

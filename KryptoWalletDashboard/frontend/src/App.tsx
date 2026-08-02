@@ -4,6 +4,7 @@ import Overview from "./pages/Overview";
 import Transactions from "./pages/Transactions";
 import SyncPage from "./pages/Sync";
 import Konfiguration from "./pages/Konfiguration";
+import Accounts from "./pages/Accounts";
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
           <Route path="/transactions" element={<Transactions />} />
           <Route path="/sync" element={<SyncPage />} />
           <Route path="/konfiguration" element={<Konfiguration />} />
+          <Route path="/accounts" element={<Accounts />} />
         </Routes>
       </main>
     </div>
