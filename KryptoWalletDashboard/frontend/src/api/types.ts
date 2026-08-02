@@ -38,3 +38,45 @@ export type SyncResult =
 export interface SyncResponse {
   results: SyncResult[];
 }
+
+export interface ConfigField {
+  name: string;
+  section: string;
+  label: string;
+  is_secret: boolean;
+  hint: string;
+  value: string;
+}
+
+export interface ConfigResponse {
+  fields: ConfigField[];
+}
+
+export interface Account {
+  source_name: string;
+  account_label: string;
+  transaction_count: number;
+  last_synced_at: string | null;
+  last_error: string | null;
+  is_configured: boolean;
+}
+
+export interface AccountsResponse {
+  accounts: Account[];
+}
+
+export interface AccountRef {
+  source_name: string;
+  account_label: string;
+}
+
+export interface DeleteAccountsResult {
+  source_name: string;
+  account_label: string;
+  deleted_transactions: number;
+  dry_run: boolean;
+}
+
+export interface DeleteAccountsResponse {
+  results: DeleteAccountsResult[];
+}

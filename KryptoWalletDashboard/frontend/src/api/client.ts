@@ -1,4 +1,13 @@
-import type { PortfolioEntry, SyncResponse, Transaction, TransactionFilters } from "./types";
+import type {
+  AccountRef,
+  AccountsResponse,
+  ConfigResponse,
+  DeleteAccountsResponse,
+  PortfolioEntry,
+  SyncResponse,
+  Transaction,
+  TransactionFilters,
+} from "./types";
 
 const API_BASE = "http://127.0.0.1:8000";
 
@@ -45,6 +54,45 @@ export async function triggerSync(): Promise<SyncResponse> {
   const response = await fetch(`${API_BASE}/api/sync`, { method: "POST" });
   if (!response.ok) {
     throw new Error(`Sync fehlgeschlagen: ${await errorDetail(response)}`);
+  }
+  return response.json();
+}
+
+export async function fetchConfig(): Promise<ConfigResponse> {
+  const response = await fetch(`${API_BASE}/api/config`);
+  if (!response.ok) {
+    throw new Error(`Konfiguration konnte nicht geladen werden: ${await errorDetail(response)}`);
+  }
+  return response.json();
+}
+
+export async function saveConfig(values: Record<string, string>): Promise<void> {
+  const response = await fetch(`${API_BASE}/api/config`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(values),
+  });
+  if (!response.ok) {
+    throw new Error(`Konfiguration konnte nicht gespeichert werden: ${await errorDetail(response)}`);
+  }
+}
+
+export async function fetchAccounts(): Promise<AccountsResponse> {
+  const response = await fetch(`${API_BASE}/api/accounts`);
+  if (!response.ok) {
+    throw new Error(`Accounts konnten nicht geladen werden: ${await errorDetail(response)}`);
+  }
+  return response.json();
+}
+
+export async function deleteAccounts(accounts: AccountRef[]): Promise<DeleteAccountsResponse> {
+  const response = await fetch(`${API_BASE}/api/accounts/delete`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accounts }),
+  });
+  if (!response.ok) {
+    throw new Error(`Löschen fehlgeschlagen: ${await errorDetail(response)}`);
   }
   return response.json();
 }

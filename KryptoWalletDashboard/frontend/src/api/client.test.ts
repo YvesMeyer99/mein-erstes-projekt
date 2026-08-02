@@ -117,3 +117,92 @@ describe("triggerSync", () => {
     await expect(triggerSync()).rejects.toThrow(/Ungültiger Datumsbereich/);
   });
 });
+
+import { deleteAccounts, fetchAccounts, fetchConfig, saveConfig } from "./client";
+
+describe("fetchConfig", () => {
+  it("returns the parsed fields array", async () => {
+    mockFetchOnce({
+      fields: [
+        { name: "SOLANA_ADDRESSES", section: "Solana", label: "Adressen", is_secret: false, hint: "", value: "main:abc" },
+      ],
+    });
+
+    const result = await fetchConfig();
+
+    expect(result.fields[0].name).toBe("SOLANA_ADDRESSES");
+  });
+
+  it("throws when the response is not ok", async () => {
+    mockFetchOnce(null, false, 500);
+
+    await expect(fetchConfig()).rejects.toThrow();
+  });
+});
+
+describe("saveConfig", () => {
+  it("POSTs the given field values as JSON", async () => {
+    mockFetchOnce({ status: "ok" });
+
+    await saveConfig({ SOLANA_ADDRESSES: "main:new" });
+
+    const [url, options] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toContain("/api/config");
+    expect(options.method).toBe("POST");
+    expect(JSON.parse(options.body)).toEqual({ SOLANA_ADDRESSES: "main:new" });
+  });
+
+  it("throws when the response is not ok", async () => {
+    mockFetchOnce(null, false, 500);
+
+    await expect(saveConfig({})).rejects.toThrow();
+  });
+});
+
+describe("fetchAccounts", () => {
+  it("returns the parsed accounts array", async () => {
+    mockFetchOnce({
+      accounts: [
+        {
+          source_name: "bitcoin",
+          account_label: "ledger",
+          transaction_count: 3,
+          last_synced_at: null,
+          last_error: null,
+          is_configured: true,
+        },
+      ],
+    });
+
+    const result = await fetchAccounts();
+
+    expect(result.accounts[0].source_name).toBe("bitcoin");
+  });
+
+  it("throws when the response is not ok", async () => {
+    mockFetchOnce(null, false, 500);
+
+    await expect(fetchAccounts()).rejects.toThrow();
+  });
+});
+
+describe("deleteAccounts", () => {
+  it("POSTs the given account refs and returns the results", async () => {
+    mockFetchOnce({
+      results: [{ source_name: "bitcoin", account_label: "ledger", deleted_transactions: 3, dry_run: false }],
+    });
+
+    const result = await deleteAccounts([{ source_name: "bitcoin", account_label: "ledger" }]);
+
+    expect(result.results[0].deleted_transactions).toBe(3);
+    const [url, options] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
+    expect(url).toContain("/api/accounts/delete");
+    expect(JSON.parse(options.body)).toEqual({ accounts: [{ source_name: "bitcoin", account_label: "ledger" }] });
+  });
+
+  it("throws when the response is not ok", async () => {
+    mockFetchOnce(null, false, 500);
+
+    await expect(deleteAccounts([])).rejects.toThrow();
+  });
+});
