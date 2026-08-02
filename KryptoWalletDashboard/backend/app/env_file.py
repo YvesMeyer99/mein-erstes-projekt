@@ -60,19 +60,27 @@ def _read_raw_values(path: str) -> dict[str, str]:
     return values
 
 
-def read_config_values(path: str = ENV_FILE_PATH) -> dict[str, str]:
+def read_config_values(path: str | None = None) -> dict[str, str]:
     """Current value per known field, read directly from the .env file
     (not os.environ -- this must reflect the file even before the running
     process has reloaded). Secret fields are always "" regardless of what
-    is actually stored: the real value never reaches the frontend."""
-    raw = _read_raw_values(path)
+    is actually stored: the real value never reaches the frontend.
+
+    `path` defaults to the *current* value of the module-level
+    ENV_FILE_PATH, resolved when this function is called rather than when
+    it was defined -- a plain `path: str = ENV_FILE_PATH` default would
+    capture the value once at import time, so callers (and tests) that
+    monkeypatch `app.env_file.ENV_FILE_PATH` afterwards would be silently
+    ignored.
+    """
+    raw = _read_raw_values(path if path is not None else ENV_FILE_PATH)
     return {
         field.name: ("" if field.is_secret else raw.get(field.name, ""))
         for field in CONFIG_FIELDS
     }
 
 
-def write_config_values(updates: dict[str, str], path: str = ENV_FILE_PATH) -> None:
+def write_config_values(updates: dict[str, str], path: str | None = None) -> None:
     """Apply `updates` (field name -> new value) to the .env file in
     place, preserving every other line (comments, unrelated variables)
     untouched.
@@ -82,7 +90,12 @@ def write_config_values(updates: dict[str, str], path: str = ENV_FILE_PATH) -> N
     a deliberate clear). Every other field's empty string is a deliberate
     clear -- the UI does show the current value, so the user seeing and
     blanking it is intentional.
+
+    See `read_config_values` above for why `path` defaults to `None` and
+    is resolved against the current `ENV_FILE_PATH` inside the function
+    body instead of as a literal default value.
     """
+    path = path if path is not None else ENV_FILE_PATH
     effective_updates = {
         name: value
         for name, value in updates.items()

@@ -368,3 +368,116 @@ def test_prune_endpoint_supports_dry_run_query_param(db_session):
     assert response.json()["results"][0]["dry_run"] is True
     assert db_session.query(Transaction).count() == 1
     app.dependency_overrides.clear()
+
+
+def test_config_get_endpoint_returns_all_fields_with_secrets_masked(db_session, tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("SOLANA_ADDRESSES=main:abc\nKRAKEN_API_SECRET=real-secret\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.get("/api/config")
+
+    assert response.status_code == 200
+    fields = {f["name"]: f for f in response.json()["fields"]}
+    assert fields["SOLANA_ADDRESSES"]["value"] == "main:abc"
+    assert fields["KRAKEN_API_SECRET"]["value"] == ""
+    assert fields["KRAKEN_API_SECRET"]["is_secret"] is True
+    app.dependency_overrides.clear()
+
+
+def test_config_post_endpoint_writes_file_and_reloads(db_session, tmp_path, monkeypatch):
+    from app import config
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("SOLANA_ADDRESSES=main:old\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+    monkeypatch.delenv("SOLANA_ADDRESSES", raising=False)
+    monkeypatch.setattr(config, "SOLANA_WALLETS", config.SOLANA_WALLETS)
+
+    client = _client(db_session)
+    response = client.post("/api/config", json={"SOLANA_ADDRESSES": "main:new"})
+
+    assert response.status_code == 200
+    assert "SOLANA_ADDRESSES=main:new" in env_file.read_text(encoding="utf-8")
+    assert config.SOLANA_WALLETS[0].address == "new"
+    app.dependency_overrides.clear()
+
+
+def test_config_post_endpoint_leaves_secret_untouched_when_empty(db_session, tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("KRAKEN_API_SECRET=existing\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.post("/api/config", json={"KRAKEN_API_SECRET": ""})
+
+    assert response.status_code == 200
+    assert "KRAKEN_API_SECRET=existing" in env_file.read_text(encoding="utf-8")
+    app.dependency_overrides.clear()
+
+
+def test_accounts_endpoint_lists_accounts_with_configured_flag(db_session):
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="ledger",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="id1",
+            raw_json="{}",
+        )
+    )
+    db_session.commit()
+
+    class FakeAdapter:
+        source_type = "chain"
+        source_name = "bitcoin"
+        account_label = "ledger"
+
+        def fetch_transactions(self, since):
+            return []
+
+    client = _client(db_session, adapters=[FakeAdapter()])
+    response = client.get("/api/accounts")
+
+    assert response.status_code == 200
+    accounts = response.json()["accounts"]
+    assert len(accounts) == 1
+    assert accounts[0]["source_name"] == "bitcoin"
+    assert accounts[0]["transaction_count"] == 1
+    assert accounts[0]["is_configured"] is True
+    app.dependency_overrides.clear()
+
+
+def test_accounts_delete_endpoint_deletes_the_given_accounts(db_session):
+    db_session.add(
+        Transaction(
+            timestamp=datetime(2024, 1, 15, tzinfo=timezone.utc),
+            source_type="chain",
+            source_name="bitcoin",
+            account_label="ledger",
+            tx_type="transfer_in",
+            asset="BTC",
+            amount=Decimal("1"),
+            external_id="id1",
+            raw_json="{}",
+        )
+    )
+    db_session.commit()
+
+    client = _client(db_session)
+    response = client.post(
+        "/api/accounts/delete",
+        json={"accounts": [{"source_name": "bitcoin", "account_label": "ledger"}]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"] == [
+        {"source_name": "bitcoin", "account_label": "ledger", "deleted_transactions": 1, "dry_run": False}
+    ]
+    assert db_session.query(Transaction).count() == 0
+    app.dependency_overrides.clear()

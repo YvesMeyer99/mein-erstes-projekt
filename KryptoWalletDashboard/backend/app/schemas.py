@@ -52,3 +52,12 @@ class TransactionOut(BaseModel):
     external_id: str
 
     model_config = {"from_attributes": True}
+
+
+class AccountRef(BaseModel):
+    source_name: str
+    account_label: str
+
+
+class DeleteAccountsRequest(BaseModel):
+    accounts: list[AccountRef]
