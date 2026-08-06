@@ -64,5 +64,13 @@ class DeleteAccountsRequest(BaseModel):
 
 
 class ConfigUpdateRequest(BaseModel):
+    """extra="forbid" makes an unexpected top-level key (e.g. the OLD
+    pre-this-task POST /api/config body shape, a bare {"FIELD": "value"}
+    dict) a 422 validation error instead of being silently accepted and
+    defaulting values/sections to {} -- which would otherwise report
+    200 {"status": "ok"} while writing nothing at all."""
+
+    model_config = {"extra": "forbid"}
+
     values: dict[str, str] = {}
     sections: dict[str, bool] = {}

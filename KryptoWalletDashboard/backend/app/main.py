@@ -13,6 +13,8 @@ from app.env_file import (
     CONFIG_FIELDS,
     SECTION_TOGGLE_ENV_VAR,
     InvalidConfigValueError,
+    _validate_config_updates,
+    _validate_section_toggles,
     read_config_values,
     read_section_toggles,
     write_config_values,
@@ -91,6 +93,12 @@ def api_get_config():
 @app.post("/api/config")
 def api_post_config(payload: ConfigUpdateRequest):
     try:
+        # Validate both halves of the request up front, before writing
+        # either -- so a request that ultimately 400s (e.g. valid values
+        # but an unknown section name) never partially mutates the .env
+        # file (values written, then the section-toggle write fails).
+        _validate_config_updates(payload.values)
+        _validate_section_toggles(payload.sections)
         write_config_values(payload.values)
         write_section_toggles(payload.sections)
     except InvalidConfigValueError as exc:

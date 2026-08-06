@@ -592,4 +592,50 @@ def test_config_post_endpoint_rejects_unknown_section(db_session, tmp_path, monk
 
     assert response.status_code == 400
     app.dependency_overrides.clear()
+
+
+def test_config_post_endpoint_rejects_old_pre_sections_body_shape(db_session, tmp_path, monkeypatch):
+    # Regression test for ConfigUpdateRequest's extra="forbid": the OLD
+    # (pre-this-task) POST /api/config body shape was a bare
+    # {"FIELD_NAME": "value"} dict. Without extra="forbid" that top-level
+    # key is silently ignored by pydantic (neither "values" nor
+    # "sections" is present, so both default to {}), so the request would
+    # return 200 {"status": "ok"} while writing nothing at all -- a
+    # confusing silent no-op if the frontend (or a caller reverting a
+    # change) ever sends the old shape.
+    env_file = tmp_path / ".env"
+    env_file.write_text("SOLANA_ADDRESSES=old\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.post("/api/config", json={"SOLANA_ADDRESSES": "main:new"})
+
+    assert response.status_code == 422
+    assert env_file.read_text(encoding="utf-8") == "SOLANA_ADDRESSES=old\n"
+    app.dependency_overrides.clear()
+
+
+def test_config_post_endpoint_does_not_partially_write_when_sections_invalid(
+    db_session, tmp_path, monkeypatch
+):
+    # Reviewer repro: api_post_config used to call write_config_values(...)
+    # then write_section_toggles(...) sequentially. If the values write
+    # succeeded but the section-toggle write then failed validation, the
+    # .env file ended up with the values change already applied even
+    # though the overall request was reported as a 400 failure. Both
+    # halves must now be validated up front, before either write happens.
+    env_file = tmp_path / ".env"
+    env_file.write_text("SOLANA_ADDRESSES=old\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.post(
+        "/api/config",
+        json={"values": {"SOLANA_ADDRESSES": "main:PARTIAL"}, "sections": {"NotASection": True}},
+    )
+
+    assert response.status_code == 400
+    content = env_file.read_text(encoding="utf-8")
+    assert content == "SOLANA_ADDRESSES=old\n"
+    assert "main:PARTIAL" not in content
     app.dependency_overrides.clear()

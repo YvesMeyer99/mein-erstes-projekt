@@ -164,17 +164,44 @@ def read_section_toggles(path: str | None = None) -> dict[str, bool]:
     }
 
 
-def write_section_toggles(updates: dict[str, bool], path: str | None = None) -> None:
-    """updates: section name (e.g. "Bitcoin") -> desired enabled state."""
+def _validate_section_toggles(updates: dict[str, bool]) -> None:
+    """Raise InvalidConfigValueError if `updates` contains a section name
+    not in SECTION_TOGGLE_ENV_VAR. Factored out of write_section_toggles
+    so api_post_config (app/main.py) can validate both the values and the
+    section-toggle updates from a single request up front, before writing
+    either -- keeping a request that ultimately 400s from partially
+    mutating the .env file (e.g. values written successfully, then the
+    section-toggle write fails validation)."""
     unknown = set(updates) - set(SECTION_TOGGLE_ENV_VAR)
     if unknown:
         raise InvalidConfigValueError(f"Unknown section(s): {', '.join(sorted(unknown))}")
+
+
+def write_section_toggles(updates: dict[str, bool], path: str | None = None) -> None:
+    """updates: section name (e.g. "Bitcoin") -> desired enabled state."""
+    _validate_section_toggles(updates)
 
     env_updates = {
         SECTION_TOGGLE_ENV_VAR[section]: ("true" if enabled else "false")
         for section, enabled in updates.items()
     }
     _write_raw_updates(env_updates, path if path is not None else ENV_FILE_PATH)
+
+
+def _validate_config_updates(updates: dict[str, str]) -> None:
+    """Raise InvalidConfigValueError if `updates` contains an unknown
+    CONFIG_FIELDS name, or a value containing a literal newline or
+    carriage return. Factored out of write_config_values so
+    api_post_config (app/main.py) can validate both the values and the
+    section-toggle updates from a single request up front, before writing
+    either -- see _validate_section_toggles for why."""
+    for name, value in updates.items():
+        if name not in _KNOWN_FIELD_NAMES:
+            raise InvalidConfigValueError(f"Unknown config field: {name!r}")
+        if "\n" in value or "\r" in value:
+            raise InvalidConfigValueError(
+                f"Value for {name!r} must not contain a newline or carriage-return character"
+            )
 
 
 def write_config_values(updates: dict[str, str], path: str | None = None) -> None:
@@ -196,13 +223,7 @@ def write_config_values(updates: dict[str, str], path: str | None = None) -> Non
     update whose key isn't a known CONFIG_FIELDS name, or whose value
     contains a literal "\\n" or "\\r".
     """
-    for name, value in updates.items():
-        if name not in _KNOWN_FIELD_NAMES:
-            raise InvalidConfigValueError(f"Unknown config field: {name!r}")
-        if "\n" in value or "\r" in value:
-            raise InvalidConfigValueError(
-                f"Value for {name!r} must not contain a newline or carriage-return character"
-            )
+    _validate_config_updates(updates)
 
     effective_updates = {
         name: value
