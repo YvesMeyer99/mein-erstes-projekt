@@ -48,7 +48,13 @@ export interface ConfigField {
   value: string;
 }
 
+export interface ConfigSection {
+  name: string;
+  enabled: boolean;
+}
+
 export interface ConfigResponse {
+  sections: ConfigSection[];
   fields: ConfigField[];
 }
 

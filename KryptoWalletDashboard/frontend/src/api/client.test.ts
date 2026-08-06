@@ -121,8 +121,9 @@ describe("triggerSync", () => {
 import { deleteAccounts, fetchAccounts, fetchConfig, saveConfig } from "./client";
 
 describe("fetchConfig", () => {
-  it("returns the parsed fields array", async () => {
+  it("returns the parsed sections and fields", async () => {
     mockFetchOnce({
+      sections: [{ name: "Bitcoin", enabled: true }],
       fields: [
         { name: "SOLANA_ADDRESSES", section: "Solana", label: "Adressen", is_secret: false, hint: "", value: "main:abc" },
       ],
@@ -130,6 +131,7 @@ describe("fetchConfig", () => {
 
     const result = await fetchConfig();
 
+    expect(result.sections[0].name).toBe("Bitcoin");
     expect(result.fields[0].name).toBe("SOLANA_ADDRESSES");
   });
 
@@ -141,21 +143,24 @@ describe("fetchConfig", () => {
 });
 
 describe("saveConfig", () => {
-  it("POSTs the given field values as JSON", async () => {
+  it("POSTs values and sections together as JSON", async () => {
     mockFetchOnce({ status: "ok" });
 
-    await saveConfig({ SOLANA_ADDRESSES: "main:new" });
+    await saveConfig({ SOLANA_ADDRESSES: "main:new" }, { Bitcoin: false });
 
     const [url, options] = (fetch as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(url).toContain("/api/config");
     expect(options.method).toBe("POST");
-    expect(JSON.parse(options.body)).toEqual({ SOLANA_ADDRESSES: "main:new" });
+    expect(JSON.parse(options.body)).toEqual({
+      values: { SOLANA_ADDRESSES: "main:new" },
+      sections: { Bitcoin: false },
+    });
   });
 
   it("throws when the response is not ok", async () => {
     mockFetchOnce(null, false, 500);
 
-    await expect(saveConfig({})).rejects.toThrow();
+    await expect(saveConfig({}, {})).rejects.toThrow();
   });
 });
 

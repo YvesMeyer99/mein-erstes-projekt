@@ -66,11 +66,14 @@ export async function fetchConfig(): Promise<ConfigResponse> {
   return response.json();
 }
 
-export async function saveConfig(values: Record<string, string>): Promise<void> {
+export async function saveConfig(
+  values: Record<string, string>,
+  sections: Record<string, boolean>,
+): Promise<void> {
   const response = await fetch(`${API_BASE}/api/config`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(values),
+    body: JSON.stringify({ values, sections }),
   });
   if (!response.ok) {
     throw new Error(`Konfiguration konnte nicht gespeichert werden: ${await errorDetail(response)}`);

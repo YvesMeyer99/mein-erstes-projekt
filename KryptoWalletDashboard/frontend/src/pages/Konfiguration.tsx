@@ -15,6 +15,7 @@ function groupBySection(fields: ConfigField[]): Map<string, ConfigField[]> {
 function Konfiguration() {
   const [fields, setFields] = useState<ConfigField[] | null>(null);
   const [values, setValues] = useState<Record<string, string>>({});
+  const [sections, setSections] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -23,11 +24,17 @@ function Konfiguration() {
     fetchConfig()
       .then((response) => {
         setFields(response.fields);
-        const initial: Record<string, string> = {};
+        const initialValues: Record<string, string> = {};
         for (const field of response.fields) {
-          initial[field.name] = field.value;
+          initialValues[field.name] = field.value;
         }
-        setValues(initial);
+        setValues(initialValues);
+
+        const initialSections: Record<string, boolean> = {};
+        for (const section of response.sections) {
+          initialSections[section.name] = section.enabled;
+        }
+        setSections(initialSections);
       })
       .catch((err: unknown) => setError(err instanceof Error ? err.message : String(err)));
   }, []);
@@ -37,7 +44,7 @@ function Konfiguration() {
     setError(null);
     setSaved(false);
     try {
-      await saveConfig(values);
+      await saveConfig(values, sections);
       setSaved(true);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
@@ -58,7 +65,7 @@ function Konfiguration() {
     return <div>Konfiguration wird geladen…</div>;
   }
 
-  const sections = groupBySection(fields);
+  const groupedSections = groupBySection(fields);
 
   return (
     <div>
@@ -66,13 +73,25 @@ function Konfiguration() {
       <p className="mb-6 text-sm text-gray-500">
         Änderungen werden sofort in der .env-Datei gespeichert und beim nächsten Sync verwendet - kein
         Neustart nötig. Secret-Felder zeigen nie den gespeicherten Wert - leer lassen, um ihn unverändert
-        zu behalten.
+        zu behalten. Eine abgewählte Schnittstelle wird beim Sync übersprungen, ihre Werte bleiben aber
+        erhalten.
       </p>
 
-      {Array.from(sections.entries()).map(([section, sectionFields]) => (
+      {Array.from(groupedSections.entries()).map(([section, sectionFields]) => (
         <fieldset key={section} className="mb-6 rounded border border-gray-200 p-4">
-          <legend className="px-1 text-sm font-semibold">{section}</legend>
-          <div className="space-y-3">
+          <legend className="flex items-center gap-2 px-1 text-sm font-semibold">
+            <input
+              type="checkbox"
+              role="checkbox"
+              aria-label={section}
+              checked={sections[section] ?? true}
+              onChange={(e) =>
+                setSections((prev) => ({ ...prev, [section]: e.target.checked }))
+              }
+            />
+            {section}
+          </legend>
+          <div className={sections[section] === false ? "space-y-3 opacity-50" : "space-y-3"}>
             {sectionFields.map((field) => (
               <div key={field.name}>
                 <label htmlFor={field.name} className="mb-1 block text-sm text-gray-700">
