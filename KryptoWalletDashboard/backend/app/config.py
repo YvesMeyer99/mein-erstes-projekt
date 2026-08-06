@@ -71,6 +71,18 @@ def normalize_pem_env_value(env_value: str | None) -> str:
     return env_value.replace("\\n", "\n")
 
 
+def _parse_enabled(env_value: str | None) -> bool:
+    """Missing/unset means enabled (opt-out semantics): an existing
+    user's already-configured section keeps syncing after this feature
+    ships with zero action needed -- only an explicit "false" disables
+    it. Anything other than exactly "false" (case-insensitive) is
+    treated as enabled, matching how a checkbox naturally maps to
+    true/false rather than a stricter boolean grammar."""
+    if env_value is None:
+        return True
+    return env_value.strip().lower() != "false"
+
+
 def _load_all_from_env() -> None:
     """Assign every hot-reloadable config constant from the current
     os.environ. Called once at import time below, and again by
@@ -84,6 +96,8 @@ def _load_all_from_env() -> None:
     global COINBASE_API_KEY_NAME, COINBASE_API_PRIVATE_KEY
     global MEXC_API_KEY, MEXC_API_SECRET, MEXC_TRADING_PAIRS
     global BINANCE_API_KEY, BINANCE_API_SECRET, BINANCE_TRADING_PAIRS, BINANCE_SYNC_START
+    global BITCOIN_ENABLED, SOLANA_ENABLED, CARDANO_ENABLED, VECHAIN_ENABLED, EVM_ENABLED
+    global KRAKEN_ENABLED, COINBASE_ENABLED, MEXC_ENABLED, BINANCE_ENABLED
 
     BITCOIN_WALLETS = parse_wallets(os.getenv("BITCOIN_ADDRESSES"))
     BITCOIN_XPUBS = parse_wallets(os.getenv("BITCOIN_XPUBS"))
@@ -104,6 +118,16 @@ def _load_all_from_env() -> None:
     BINANCE_API_SECRET = os.getenv("BINANCE_API_SECRET", "")
     BINANCE_TRADING_PAIRS = parse_trading_pairs(os.getenv("BINANCE_TRADING_PAIRS"))
     BINANCE_SYNC_START = parse_sync_start(os.getenv("BINANCE_SYNC_START"))
+
+    BITCOIN_ENABLED = _parse_enabled(os.getenv("BITCOIN_ENABLED"))
+    SOLANA_ENABLED = _parse_enabled(os.getenv("SOLANA_ENABLED"))
+    CARDANO_ENABLED = _parse_enabled(os.getenv("CARDANO_ENABLED"))
+    VECHAIN_ENABLED = _parse_enabled(os.getenv("VECHAIN_ENABLED"))
+    EVM_ENABLED = _parse_enabled(os.getenv("EVM_ENABLED"))
+    KRAKEN_ENABLED = _parse_enabled(os.getenv("KRAKEN_ENABLED"))
+    COINBASE_ENABLED = _parse_enabled(os.getenv("COINBASE_ENABLED"))
+    MEXC_ENABLED = _parse_enabled(os.getenv("MEXC_ENABLED"))
+    BINANCE_ENABLED = _parse_enabled(os.getenv("BINANCE_ENABLED"))
 
 
 _load_all_from_env()

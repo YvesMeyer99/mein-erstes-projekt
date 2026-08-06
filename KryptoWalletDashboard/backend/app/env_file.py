@@ -43,18 +43,29 @@ CONFIG_FIELDS: list[ConfigField] = [
 _SECRET_FIELD_NAMES = {f.name for f in CONFIG_FIELDS if f.is_secret}
 _KNOWN_FIELD_NAMES = {f.name for f in CONFIG_FIELDS}
 
+SECTION_TOGGLE_ENV_VAR: dict[str, str] = {
+    "Bitcoin": "BITCOIN_ENABLED",
+    "Solana": "SOLANA_ENABLED",
+    "Cardano": "CARDANO_ENABLED",
+    "VeChain": "VECHAIN_ENABLED",
+    "Ethereum & EVM-Chains": "EVM_ENABLED",
+    "Kraken": "KRAKEN_ENABLED",
+    "Coinbase": "COINBASE_ENABLED",
+    "MEXC": "MEXC_ENABLED",
+    "Binance": "BINANCE_ENABLED",
+}
+
 
 class InvalidConfigValueError(ValueError):
-    """Raised by write_config_values for an update that must never be
-    written to the .env file as-is: an unknown field name (not part of
-    CONFIG_FIELDS, the single source of truth for what this app exposes),
-    or a value containing a literal newline / carriage-return character.
+    """Raised for a config write request that must not be silently
+    accepted: an unknown field/section name, or a value containing a
+    literal newline or carriage return.
 
-    A literal newline in a value would let write_config_values' line-based
-    .env writer be tricked into emitting an extra "line" -- effectively
-    letting one field's submitted value inject an arbitrary, unrelated
-    key=value assignment (including overwriting a *different* field, such
-    as a secret) into the file. Multi-line values (e.g. the Coinbase PEM
+    A literal newline in a value would let the line-based .env writer be
+    tricked into emitting an extra "line" -- effectively letting one
+    field's submitted value inject an arbitrary, unrelated key=value
+    assignment (including overwriting a *different* field, such as a
+    secret) into the file. Multi-line values (e.g. the Coinbase PEM
     private key) are always represented in .env with escaped `\\n`
     *sequences*, never real newlines -- see app.config.normalize_pem_env_value,
     which converts them back on read. So rejecting a raw newline here
@@ -99,39 +110,14 @@ def read_config_values(path: str | None = None) -> dict[str, str]:
     }
 
 
-def write_config_values(updates: dict[str, str], path: str | None = None) -> None:
-    """Apply `updates` (field name -> new value) to the .env file in
-    place, preserving every other line (comments, unrelated variables)
-    untouched.
-
-    A SECRET field's empty string means "leave the existing stored value
-    unchanged" (the UI never shows secrets, so an empty submission isn't
-    a deliberate clear). Every other field's empty string is a deliberate
-    clear -- the UI does show the current value, so the user seeing and
-    blanking it is intentional.
-
-    See `read_config_values` above for why `path` defaults to `None` and
-    is resolved against the current `ENV_FILE_PATH` inside the function
-    body instead of as a literal default value.
-
-    Raises InvalidConfigValueError -- before touching the file -- for any
-    update whose key isn't a known CONFIG_FIELDS name, or whose value
-    contains a literal "\\n" or "\\r".
+def _write_raw_updates(effective_updates: dict[str, str], path: str) -> None:
+    """Shared line-rewriting primitive for both write_config_values and
+    write_section_toggles: replaces matching `KEY=...` lines in place,
+    preserving every other line (comments, unrelated variables)
+    untouched, and appends any key not already present. Callers are
+    responsible for their own key/value validation before calling this --
+    it does no validation itself.
     """
-    for name, value in updates.items():
-        if name not in _KNOWN_FIELD_NAMES:
-            raise InvalidConfigValueError(f"Unknown config field: {name!r}")
-        if "\n" in value or "\r" in value:
-            raise InvalidConfigValueError(
-                f"Value for {name!r} must not contain a newline or carriage-return character"
-            )
-
-    path = path if path is not None else ENV_FILE_PATH
-    effective_updates = {
-        name: value
-        for name, value in updates.items()
-        if not (name in _SECRET_FIELD_NAMES and value == "")
-    }
     if not effective_updates:
         return
 
@@ -162,3 +148,65 @@ def write_config_values(updates: dict[str, str], path: str | None = None) -> Non
 
     with open(path, "w", encoding="utf-8") as f:
         f.writelines(new_lines)
+
+
+def read_section_toggles(path: str | None = None) -> dict[str, bool]:
+    """Enabled/disabled state per section, read directly from the .env
+    file. A missing env var means enabled -- see app.config._parse_enabled
+    for the identical convention applied when the running process loads
+    its config, and the design doc for why (opt-out, not opt-in: an
+    existing user's already-configured sections must keep working
+    without any action on their part after this feature ships)."""
+    raw = _read_raw_values(path if path is not None else ENV_FILE_PATH)
+    return {
+        section: raw.get(env_var, "true").strip().lower() != "false"
+        for section, env_var in SECTION_TOGGLE_ENV_VAR.items()
+    }
+
+
+def write_section_toggles(updates: dict[str, bool], path: str | None = None) -> None:
+    """updates: section name (e.g. "Bitcoin") -> desired enabled state."""
+    unknown = set(updates) - set(SECTION_TOGGLE_ENV_VAR)
+    if unknown:
+        raise InvalidConfigValueError(f"Unknown section(s): {', '.join(sorted(unknown))}")
+
+    env_updates = {
+        SECTION_TOGGLE_ENV_VAR[section]: ("true" if enabled else "false")
+        for section, enabled in updates.items()
+    }
+    _write_raw_updates(env_updates, path if path is not None else ENV_FILE_PATH)
+
+
+def write_config_values(updates: dict[str, str], path: str | None = None) -> None:
+    """Apply `updates` (field name -> new value) to the .env file in
+    place, preserving every other line (comments, unrelated variables)
+    untouched.
+
+    A SECRET field's empty string means "leave the existing stored value
+    unchanged" (the UI never shows secrets, so an empty submission isn't
+    a deliberate clear). Every other field's empty string is a deliberate
+    clear -- the UI does show the current value, so the user seeing and
+    blanking it is intentional.
+
+    See `read_config_values` above for why `path` defaults to `None` and
+    is resolved against the current `ENV_FILE_PATH` inside the function
+    body instead of as a literal default value.
+
+    Raises InvalidConfigValueError -- before touching the file -- for any
+    update whose key isn't a known CONFIG_FIELDS name, or whose value
+    contains a literal "\\n" or "\\r".
+    """
+    for name, value in updates.items():
+        if name not in _KNOWN_FIELD_NAMES:
+            raise InvalidConfigValueError(f"Unknown config field: {name!r}")
+        if "\n" in value or "\r" in value:
+            raise InvalidConfigValueError(
+                f"Value for {name!r} must not contain a newline or carriage-return character"
+            )
+
+    effective_updates = {
+        name: value
+        for name, value in updates.items()
+        if not (name in _SECRET_FIELD_NAMES and value == "")
+    }
+    _write_raw_updates(effective_updates, path if path is not None else ENV_FILE_PATH)

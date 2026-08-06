@@ -152,6 +152,91 @@ def test_reload_config_picks_up_changed_values_from_the_env_file(tmp_path, monke
         config.SOLANA_WALLETS = original_solana_wallets
 
 
+_SECTION_ENABLED_NAMES = [
+    "BITCOIN_ENABLED", "SOLANA_ENABLED", "CARDANO_ENABLED", "VECHAIN_ENABLED",
+    "EVM_ENABLED", "KRAKEN_ENABLED", "COINBASE_ENABLED", "MEXC_ENABLED", "BINANCE_ENABLED",
+]
+
+
+def test_section_enabled_flags_default_to_true_when_unset(monkeypatch):
+    import os
+
+    from app import config
+
+    # Same pitfall as test_reload_config_picks_up_changed_values_from_the_env_file
+    # above: monkeypatch.delenv(name, raising=False) registers no teardown
+    # action when the name is already absent, so it alone would not protect
+    # against _load_all_from_env() reassigning the module-level
+    # config.*_ENABLED attributes. Snapshot and restore both os.environ and
+    # every touched config attribute by hand.
+    original_env_values = {name: os.environ.get(name) for name in _SECTION_ENABLED_NAMES}
+    original_config_values = {name: getattr(config, name) for name in _SECTION_ENABLED_NAMES}
+    try:
+        for name in _SECTION_ENABLED_NAMES:
+            monkeypatch.delenv(name, raising=False)
+        config._load_all_from_env()
+
+        assert config.BITCOIN_ENABLED is True
+        assert config.SOLANA_ENABLED is True
+        assert config.CARDANO_ENABLED is True
+        assert config.VECHAIN_ENABLED is True
+        assert config.EVM_ENABLED is True
+        assert config.KRAKEN_ENABLED is True
+        assert config.COINBASE_ENABLED is True
+        assert config.MEXC_ENABLED is True
+        assert config.BINANCE_ENABLED is True
+    finally:
+        for name, value in original_env_values.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
+        for name, value in original_config_values.items():
+            setattr(config, name, value)
+
+
+def test_section_enabled_flag_is_false_when_env_var_is_false(monkeypatch):
+    import os
+
+    from app import config
+
+    original_env_value = os.environ.get("CARDANO_ENABLED")
+    original_config_value = config.CARDANO_ENABLED
+    try:
+        monkeypatch.setenv("CARDANO_ENABLED", "false")
+        config._load_all_from_env()
+
+        assert config.CARDANO_ENABLED is False
+    finally:
+        if original_env_value is None:
+            os.environ.pop("CARDANO_ENABLED", None)
+        else:
+            os.environ["CARDANO_ENABLED"] = original_env_value
+        config.CARDANO_ENABLED = original_config_value
+
+
+def test_parse_enabled_treats_missing_as_true():
+    from app.config import _parse_enabled
+
+    assert _parse_enabled(None) is True
+
+
+def test_parse_enabled_is_case_insensitive_for_false():
+    from app.config import _parse_enabled
+
+    assert _parse_enabled("False") is False
+    assert _parse_enabled("FALSE") is False
+    assert _parse_enabled("false") is False
+
+
+def test_parse_enabled_treats_anything_else_as_true():
+    from app.config import _parse_enabled
+
+    assert _parse_enabled("true") is True
+    assert _parse_enabled("yes") is True
+    assert _parse_enabled("") is True
+
+
 def test_reload_config_defaults_to_the_real_env_file_path_when_no_path_given(tmp_path, monkeypatch):
     from app import config, env_file
 

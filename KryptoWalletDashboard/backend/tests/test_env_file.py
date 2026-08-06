@@ -1,6 +1,14 @@
 import pytest
 
-from app.env_file import CONFIG_FIELDS, InvalidConfigValueError, read_config_values, write_config_values
+from app.env_file import (
+    CONFIG_FIELDS,
+    SECTION_TOGGLE_ENV_VAR,
+    InvalidConfigValueError,
+    read_config_values,
+    read_section_toggles,
+    write_config_values,
+    write_section_toggles,
+)
 
 
 def _write(path, content):
@@ -184,3 +192,80 @@ def test_config_fields_all_have_a_name_section_and_label():
 def test_config_fields_names_are_unique():
     names = [f.name for f in CONFIG_FIELDS]
     assert len(names) == len(set(names))
+
+
+def test_section_toggle_env_var_covers_every_config_fields_section():
+    assert set(SECTION_TOGGLE_ENV_VAR) == {f.section for f in CONFIG_FIELDS}
+
+
+def test_read_section_toggles_defaults_to_enabled_when_unset(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "SOLANA_ADDRESSES=main:abc\n")
+
+    toggles = read_section_toggles(str(env_file))
+
+    assert all(toggles.values())
+    assert set(toggles) == set(SECTION_TOGGLE_ENV_VAR)
+
+
+def test_read_section_toggles_reflects_explicit_false(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "CARDANO_ENABLED=false\n")
+
+    toggles = read_section_toggles(str(env_file))
+
+    assert toggles["Cardano"] is False
+    assert toggles["Bitcoin"] is True
+
+
+def test_read_section_toggles_is_case_insensitive(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "CARDANO_ENABLED=False\n")
+
+    toggles = read_section_toggles(str(env_file))
+
+    assert toggles["Cardano"] is False
+
+
+def test_write_section_toggles_writes_false_and_true(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "SOLANA_ADDRESSES=main:abc\n")
+
+    write_section_toggles({"Bitcoin": False, "Solana": True}, str(env_file))
+
+    content = env_file.read_text(encoding="utf-8")
+    assert "BITCOIN_ENABLED=false" in content
+    assert "SOLANA_ENABLED=true" in content
+    assert "SOLANA_ADDRESSES=main:abc" in content
+
+
+def test_write_section_toggles_rejects_unknown_section(tmp_path):
+    env_file = tmp_path / ".env"
+
+    with pytest.raises(InvalidConfigValueError):
+        write_section_toggles({"NotASection": True}, str(env_file))
+
+
+def test_write_section_toggles_does_nothing_for_empty_updates(tmp_path):
+    env_file = tmp_path / ".env"
+    _write(env_file, "SOLANA_ADDRESSES=main:abc\n")
+
+    write_section_toggles({}, str(env_file))
+
+    assert env_file.read_text(encoding="utf-8") == "SOLANA_ADDRESSES=main:abc\n"
+
+
+def test_write_config_values_and_write_section_toggles_can_both_touch_the_same_file(tmp_path):
+    # Regression test for the _write_raw_updates refactor: both write
+    # paths must correctly preserve each other's lines when called in
+    # sequence against the same file (this is exactly what
+    # api_post_config does: write_config_values then write_section_toggles).
+    env_file = tmp_path / ".env"
+    _write(env_file, "SOLANA_ADDRESSES=old\n")
+
+    write_config_values({"SOLANA_ADDRESSES": "new"}, str(env_file))
+    write_section_toggles({"Bitcoin": False}, str(env_file))
+
+    content = env_file.read_text(encoding="utf-8")
+    assert "SOLANA_ADDRESSES=new" in content
+    assert "BITCOIN_ENABLED=false" in content

@@ -407,3 +407,81 @@ def test_no_vechain_adapters_when_none_configured(monkeypatch):
     adapters = build_adapters_from_config()
 
     assert not any(isinstance(a, VeChainAdapter) for a in adapters)
+
+
+def test_bitcoin_adapter_not_added_when_bitcoin_disabled(monkeypatch):
+    from app.adapters.bitcoin import BitcoinAdapter
+
+    monkeypatch.setattr(config, "BITCOIN_ENABLED", False)
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [config.WalletConfig(label="main", address="bc1q...")])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, BitcoinAdapter) for a in adapters)
+
+
+def test_bitcoin_xpub_adapter_also_gated_by_bitcoin_enabled(monkeypatch):
+    from app.adapters.bitcoin_xpub import BitcoinXpubAdapter
+
+    monkeypatch.setattr(config, "BITCOIN_ENABLED", False)
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [config.WalletConfig(label="ledger", address="zpub...")])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, BitcoinXpubAdapter) for a in adapters)
+
+
+def test_kraken_adapter_not_added_when_kraken_disabled_even_with_valid_credentials(monkeypatch):
+    from app.adapters.kraken import KrakenAdapter
+
+    monkeypatch.setattr(config, "KRAKEN_ENABLED", False)
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "key")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "secret")
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, KrakenAdapter) for a in adapters)
+
+
+def test_evm_adapters_not_added_when_evm_disabled(monkeypatch):
+    monkeypatch.setattr(config, "EVM_ENABLED", False)
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [])
+    monkeypatch.setattr(
+        config, "ETHEREUM_WALLETS", [config.WalletConfig(label="main", address="0xabc")]
+    )
+    monkeypatch.setattr(config, "ETHERSCAN_API_KEY", "key")
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+
+    adapters = build_adapters_from_config()
+
+    assert not any(isinstance(a, EvmAdapter) for a in adapters)
+
+
+def test_all_sections_enabled_by_default_when_not_monkeypatched(monkeypatch):
+    # Every OTHER existing test in this file never monkeypatches the new
+    # *_ENABLED flags at all -- this proves that omission is safe (the
+    # real, unpatched attribute value is True in this test environment,
+    # matching the opt-out-disable design), so none of those tests needed
+    # updating for this feature.
+    monkeypatch.setattr(config, "BITCOIN_WALLETS", [config.WalletConfig(label="main", address="bc1q...")])
+    monkeypatch.setattr(config, "BITCOIN_XPUBS", [])
+    monkeypatch.setattr(config, "ETHEREUM_WALLETS", [])
+    monkeypatch.setattr(config, "KRAKEN_API_KEY", "")
+    monkeypatch.setattr(config, "KRAKEN_API_SECRET", "")
+
+    from app.adapters.bitcoin import BitcoinAdapter
+
+    adapters = build_adapters_from_config()
+
+    assert any(isinstance(a, BitcoinAdapter) for a in adapters)

@@ -15,31 +15,36 @@ from app.adapters.vechain import VeChainAdapter
 
 def build_adapters_from_config() -> list[TransactionAdapter]:
     adapters: list[TransactionAdapter] = []
-    for wallet in config.BITCOIN_WALLETS:
-        adapters.append(BitcoinAdapter(account_label=wallet.label, address=wallet.address))
-    for wallet in config.BITCOIN_XPUBS:
-        adapters.append(BitcoinXpubAdapter(account_label=wallet.label, extended_key=wallet.address))
-    for wallet in config.SOLANA_WALLETS:
-        adapters.append(SolanaAdapter(account_label=wallet.label, address=wallet.address))
-    for wallet in config.CARDANO_WALLETS:
-        adapters.append(CardanoAdapter(account_label=wallet.label, address=wallet.address))
-    for wallet in config.CARDANO_STAKE_WALLETS:
-        adapters.append(CardanoStakeAdapter(account_label=wallet.label, stake_address=wallet.address))
-    for wallet in config.VECHAIN_WALLETS:
-        adapters.append(VeChainAdapter(account_label=wallet.label, address=wallet.address))
-    for wallet in config.ETHEREUM_WALLETS:
-        for chain in EVM_CHAINS:
-            adapters.append(
-                EvmAdapter(
-                    account_label=wallet.label,
-                    address=wallet.address,
-                    api_key=config.ETHERSCAN_API_KEY,
-                    chain_id=chain.chain_id,
-                    chain_name=chain.chain_name,
-                    native_asset=chain.native_asset,
+    if config.BITCOIN_ENABLED:
+        for wallet in config.BITCOIN_WALLETS:
+            adapters.append(BitcoinAdapter(account_label=wallet.label, address=wallet.address))
+        for wallet in config.BITCOIN_XPUBS:
+            adapters.append(BitcoinXpubAdapter(account_label=wallet.label, extended_key=wallet.address))
+    if config.SOLANA_ENABLED:
+        for wallet in config.SOLANA_WALLETS:
+            adapters.append(SolanaAdapter(account_label=wallet.label, address=wallet.address))
+    if config.CARDANO_ENABLED:
+        for wallet in config.CARDANO_WALLETS:
+            adapters.append(CardanoAdapter(account_label=wallet.label, address=wallet.address))
+        for wallet in config.CARDANO_STAKE_WALLETS:
+            adapters.append(CardanoStakeAdapter(account_label=wallet.label, stake_address=wallet.address))
+    if config.VECHAIN_ENABLED:
+        for wallet in config.VECHAIN_WALLETS:
+            adapters.append(VeChainAdapter(account_label=wallet.label, address=wallet.address))
+    if config.EVM_ENABLED:
+        for wallet in config.ETHEREUM_WALLETS:
+            for chain in EVM_CHAINS:
+                adapters.append(
+                    EvmAdapter(
+                        account_label=wallet.label,
+                        address=wallet.address,
+                        api_key=config.ETHERSCAN_API_KEY,
+                        chain_id=chain.chain_id,
+                        chain_name=chain.chain_name,
+                        native_asset=chain.native_asset,
+                    )
                 )
-            )
-    if config.KRAKEN_API_KEY and config.KRAKEN_API_SECRET:
+    if config.KRAKEN_ENABLED and config.KRAKEN_API_KEY and config.KRAKEN_API_SECRET:
         adapters.append(
             KrakenAdapter(
                 account_label="kraken-main",
@@ -47,7 +52,7 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
                 api_secret=config.KRAKEN_API_SECRET,
             )
         )
-    if config.COINBASE_API_KEY_NAME and config.COINBASE_API_PRIVATE_KEY:
+    if config.COINBASE_ENABLED and config.COINBASE_API_KEY_NAME and config.COINBASE_API_PRIVATE_KEY:
         adapters.append(
             CoinbaseAdapter(
                 account_label="coinbase-main",
@@ -55,7 +60,7 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
                 private_key_pem=config.COINBASE_API_PRIVATE_KEY,
             )
         )
-    if config.MEXC_API_KEY and config.MEXC_API_SECRET:
+    if config.MEXC_ENABLED and config.MEXC_API_KEY and config.MEXC_API_SECRET:
         adapters.append(
             MexcAdapter(
                 account_label="mexc-main",
@@ -64,7 +69,7 @@ def build_adapters_from_config() -> list[TransactionAdapter]:
                 trading_pairs=config.MEXC_TRADING_PAIRS,
             )
         )
-    if config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
+    if config.BINANCE_ENABLED and config.BINANCE_API_KEY and config.BINANCE_API_SECRET:
         adapters.append(
             BinanceAdapter(
                 account_label="binance-main",
