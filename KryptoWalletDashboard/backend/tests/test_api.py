@@ -396,7 +396,7 @@ def test_config_post_endpoint_writes_file_and_reloads(db_session, tmp_path, monk
     monkeypatch.setattr(config, "SOLANA_WALLETS", config.SOLANA_WALLETS)
 
     client = _client(db_session)
-    response = client.post("/api/config", json={"SOLANA_ADDRESSES": "main:new"})
+    response = client.post("/api/config", json={"values": {"SOLANA_ADDRESSES": "main:new"}})
 
     assert response.status_code == 200
     assert "SOLANA_ADDRESSES=main:new" in env_file.read_text(encoding="utf-8")
@@ -410,7 +410,7 @@ def test_config_post_endpoint_leaves_secret_untouched_when_empty(db_session, tmp
     monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
 
     client = _client(db_session)
-    response = client.post("/api/config", json={"KRAKEN_API_SECRET": ""})
+    response = client.post("/api/config", json={"values": {"KRAKEN_API_SECRET": ""}})
 
     assert response.status_code == 200
     assert "KRAKEN_API_SECRET=existing" in env_file.read_text(encoding="utf-8")
@@ -425,7 +425,7 @@ def test_config_post_endpoint_rejects_value_with_injected_newline(db_session, tm
     client = _client(db_session)
     response = client.post(
         "/api/config",
-        json={"BITCOIN_ADDRESSES": "x\nKRAKEN_API_KEY=injected"},
+        json={"values": {"BITCOIN_ADDRESSES": "x\nKRAKEN_API_KEY=injected"}},
     )
 
     assert response.status_code == 400
@@ -441,7 +441,7 @@ def test_config_post_endpoint_rejects_unknown_field_name(db_session, tmp_path, m
     monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
 
     client = _client(db_session)
-    response = client.post("/api/config", json={"DATABASE_URL": "sqlite:///evil.db"})
+    response = client.post("/api/config", json={"values": {"DATABASE_URL": "sqlite:///evil.db"}})
 
     assert response.status_code == 400
     content = env_file.read_text(encoding="utf-8")
@@ -513,4 +513,83 @@ def test_accounts_delete_endpoint_deletes_the_given_accounts(db_session):
         {"source_name": "bitcoin", "account_label": "ledger", "deleted_transactions": 1, "dry_run": False}
     ]
     assert db_session.query(Transaction).count() == 0
+
+
+def test_config_get_endpoint_includes_section_toggles(db_session, tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("CARDANO_ENABLED=false\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.get("/api/config")
+
+    assert response.status_code == 200
+    sections = {s["name"]: s["enabled"] for s in response.json()["sections"]}
+    assert sections["Cardano"] is False
+    assert sections["Bitcoin"] is True
+    app.dependency_overrides.clear()
+
+
+def test_config_post_endpoint_writes_section_toggles_and_reloads(db_session, tmp_path, monkeypatch):
+    import os
+
+    from app import config
+
+    # api_post_config calls the real reload_config(), which calls
+    # load_dotenv(..., override=True) -- that sets os.environ["BITCOIN_ENABLED"]
+    # for the whole process, not just for this test. monkeypatch.setattr on the
+    # config attribute alone (the plan's literal test code) does not undo that:
+    # it only restores the Python attribute, not os.environ, so a later real
+    # config._load_all_from_env() call elsewhere in the suite would re-derive
+    # BITCOIN_ENABLED as False again. Same pitfall as
+    # test_section_enabled_flag_is_false_when_env_var_is_false in
+    # test_config.py -- snapshot and restore both by hand.
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    original_env_value = os.environ.get("BITCOIN_ENABLED")
+    original_config_value = config.BITCOIN_ENABLED
+    try:
+        client = _client(db_session)
+        response = client.post("/api/config", json={"values": {}, "sections": {"Bitcoin": False}})
+
+        assert response.status_code == 200
+        assert "BITCOIN_ENABLED=false" in env_file.read_text(encoding="utf-8")
+        assert config.BITCOIN_ENABLED is False
+    finally:
+        if original_env_value is None:
+            os.environ.pop("BITCOIN_ENABLED", None)
+        else:
+            os.environ["BITCOIN_ENABLED"] = original_env_value
+        config.BITCOIN_ENABLED = original_config_value
+    app.dependency_overrides.clear()
+
+
+def test_config_post_endpoint_still_accepts_values_alongside_sections(db_session, tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("SOLANA_ADDRESSES=old\n", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.post(
+        "/api/config",
+        json={"values": {"SOLANA_ADDRESSES": "new"}, "sections": {}},
+    )
+
+    assert response.status_code == 200
+    assert "SOLANA_ADDRESSES=new" in env_file.read_text(encoding="utf-8")
+    app.dependency_overrides.clear()
+
+
+def test_config_post_endpoint_rejects_unknown_section(db_session, tmp_path, monkeypatch):
+    env_file = tmp_path / ".env"
+    env_file.write_text("", encoding="utf-8")
+    monkeypatch.setattr("app.env_file.ENV_FILE_PATH", str(env_file))
+
+    client = _client(db_session)
+    response = client.post("/api/config", json={"values": {}, "sections": {"NotASection": True}})
+
+    assert response.status_code == 400
+    app.dependency_overrides.clear()
     app.dependency_overrides.clear()

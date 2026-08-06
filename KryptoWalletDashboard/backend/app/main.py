@@ -9,12 +9,20 @@ from app.adapters.factory import build_adapters_from_config
 from app.config import reload_config
 from app.csv_export import export_csv
 from app.db import SessionLocal
-from app.env_file import CONFIG_FIELDS, InvalidConfigValueError, read_config_values, write_config_values
+from app.env_file import (
+    CONFIG_FIELDS,
+    SECTION_TOGGLE_ENV_VAR,
+    InvalidConfigValueError,
+    read_config_values,
+    read_section_toggles,
+    write_config_values,
+    write_section_toggles,
+)
 from app.models import Transaction
 from app.portfolio import compute_portfolio
 from app.prices.coingecko import CoinGeckoPriceClient
 from app.prune import delete_accounts, list_accounts, prune_stale_accounts
-from app.schemas import DeleteAccountsRequest, PortfolioEntryOut, TransactionOut
+from app.schemas import ConfigUpdateRequest, DeleteAccountsRequest, PortfolioEntryOut, TransactionOut
 from app.sync import sync_all
 
 app = FastAPI(title="Krypto-Wallet-Dashboard")
@@ -61,7 +69,11 @@ def api_prune(
 @app.get("/api/config")
 def api_get_config():
     values = read_config_values()
+    toggles = read_section_toggles()
     return {
+        "sections": [
+            {"name": name, "enabled": toggles[name]} for name in SECTION_TOGGLE_ENV_VAR
+        ],
         "fields": [
             {
                 "name": field.name,
@@ -72,14 +84,15 @@ def api_get_config():
                 "value": values[field.name],
             }
             for field in CONFIG_FIELDS
-        ]
+        ],
     }
 
 
 @app.post("/api/config")
-def api_post_config(updates: dict[str, str]):
+def api_post_config(payload: ConfigUpdateRequest):
     try:
-        write_config_values(updates)
+        write_config_values(payload.values)
+        write_section_toggles(payload.sections)
     except InvalidConfigValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     reload_config()

@@ -61,3 +61,8 @@ class AccountRef(BaseModel):
 
 class DeleteAccountsRequest(BaseModel):
     accounts: list[AccountRef]
+
+
+class ConfigUpdateRequest(BaseModel):
+    values: dict[str, str] = {}
+    sections: dict[str, bool] = {}
