@@ -301,6 +301,17 @@ Ein unbekannter Feldname oder ein Wert mit Zeilenumbruch wird mit
 `DATABASE_URL` ist bewusst nicht Teil dieser API: sie wirkt nur beim
 Prozessstart (SQLAlchemy-Engine-Aufbau), ein Live-Wechsel wäre wirkungslos.
 
+Jede Sektion (Bitcoin, Solana, Cardano, VeChain, Ethereum & EVM-Chains,
+Kraken, Coinbase, MEXC, Binance) hat zusätzlich eine Checkbox. Ist sie
+abgewählt, werden die zugehörigen Adressen/Keys beim nächsten Sync
+**nicht** verwendet - sie bleiben aber unverändert in der `.env`
+gespeichert, sodass man eine Sektion jederzeit wieder aktivieren kann,
+ohne die Werte neu eintragen zu müssen. Fehlt der entsprechende
+`*_ENABLED`-Eintrag in der `.env` ganz (z.B. bei allen bisherigen
+Installationen vor diesem Feature), gilt die Sektion als aktiviert -
+bestehende Konfigurationen syncen also unverändert weiter, ohne dass
+etwas nachgetragen werden muss.
+
 ## Accounts gezielt löschen
 
 Anders als `/api/prune` (löscht nur, was nicht mehr in der `.env`
