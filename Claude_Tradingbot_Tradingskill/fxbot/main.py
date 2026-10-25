@@ -39,6 +39,16 @@ def _bar_slot(now_utc: datetime) -> datetime:
     return now_utc.replace(minute=minute, second=0, microsecond=0)
 
 
+def _log_outcomes(outcomes) -> None:
+    """Log each outcome; a logging problem must never be mistaken for an engine failure
+    (orders may already have been placed by then)."""
+    try:
+        for outcome in outcomes:
+            log.info("%s: %s %s", outcome.symbol, outcome.action, "; ".join(map(str, outcome.reasons)))
+    except Exception:
+        log.exception("could not log run_all_once outcomes (the engine pass itself completed)")
+
+
 def run_loop(
     engine,
     poll_seconds: int,
@@ -60,10 +70,11 @@ def run_loop(
         if slot != last_slot:
             last_slot = slot
             try:
-                for outcome in engine.run_all_once(now):
-                    log.info("%s: %s %s", outcome.symbol, outcome.action, "; ".join(outcome.reasons))
+                outcomes = engine.run_all_once(now)
             except Exception:
                 log.exception("run_all_once failed; continuing with the next bar")
+            else:
+                _log_outcomes(outcomes)
         if stop():
             break
         sleep(poll_seconds)

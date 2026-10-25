@@ -5,7 +5,9 @@ import pytest
 import fxbot.backtest_cli as backtest_cli
 import fxbot.main as main_mod
 from fxbot.config import Settings, load_config
-from fxbot.engine import LiveEngine
+import logging
+
+from fxbot.engine import LiveEngine, TradeOutcome
 
 UTC = timezone.utc
 CONFIG_EXAMPLE = "config.example.json"
@@ -139,6 +141,46 @@ def test_run_loop_survives_engine_exception():
 
     main_mod.run_loop(engine, 1, clock=clock, stop=stop, sleep=lambda s: None, settle_seconds=0)
     assert engine.n == 2
+
+
+def _run_one_pass(engine):
+    now = datetime(2026, 1, 12, 8, 20, 1, tzinfo=UTC)
+    used = {"n": 0}
+
+    def clock():
+        used["n"] += 1
+        return now
+
+    main_mod.run_loop(engine, 1, clock=clock, stop=lambda: used["n"] >= 1,
+                      sleep=lambda s: None, settle_seconds=0)
+
+
+def test_run_loop_logs_outcomes(caplog):
+    class Eng:
+        def run_all_once(self, now_utc):
+            return [TradeOutcome("EURUSD", "placed", ["note a", "note b"])]
+
+    with caplog.at_level(logging.INFO, logger="fxbot.main"):
+        _run_one_pass(Eng())
+    assert any("EURUSD: placed note a; note b" in r.getMessage() for r in caplog.records)
+    assert not any("run_all_once failed" in r.getMessage() for r in caplog.records)
+
+
+def test_run_loop_logging_error_not_misattributed_to_engine(caplog):
+    class Bad:  # an outcome whose attributes break the logging, after the pass succeeded
+        symbol = "EURUSD"
+        action = "placed"
+        reasons = None  # "; ".join(None) raises TypeError
+
+    class Eng:
+        def run_all_once(self, now_utc):
+            return [Bad()]
+
+    with caplog.at_level(logging.INFO, logger="fxbot.main"):
+        _run_one_pass(Eng())
+    messages = [r.getMessage() for r in caplog.records]
+    assert not any("run_all_once failed" in m for m in messages)
+    assert any("could not log" in m for m in messages)
 
 
 def test_run_loop_does_not_run_if_stopped_initially():
