@@ -92,6 +92,52 @@ The live terminal paths (`LiveMT5Client`, real `order_send`) are not unit-tested
 
 Result (fill in after running): _not yet performed_
 
+## Runbook: clearing an unreconciled trade
+
+**Why entries get blocked.** Every pass the bot reconciles open `trades` rows against the broker's closing
+deals. A row that is still open long after its session (past flat-by, or older than 24 h), has no closing deal
+and no matching open broker position is "stale unmatched": the loss totals may be understated, so the bot
+**fails closed** and blocks ALL new entries (the log shows `UNRECONCILED TRADE: ... trade id N`) until it is resolved.
+If it can never match automatically (position id differs from the ticket, a row that never reached the broker),
+it blocks forever - a human has to clear it with `fxbot.admin_cli`.
+
+**Safety.** The tool writes to the live DB. **Stop the bot first**, and settle one row at a time.
+It refuses unknown or already-closed ids (exit code 2), so re-running a command is harmless.
+
+**Diagnose.**
+
+```
+python -m fxbot.admin_cli list-open
+```
+
+Lists every open row (id, symbol, ticket, entry time, direction, lot, entry balance). Compare with the
+terminal's open positions and its History tab (deals) to see what really happened to the trade.
+
+**Fix - the trade really closed at the broker.** Read the real net result (profit incl. commission/swap)
+and the close time from the terminal and book it, so the daily/weekly totals and the lock stay correct:
+
+```
+python -m fxbot.admin_cli close --id 7 --profit -52.30 --close-time 2026-01-12T10:30:00+00:00 --close-price 1.0951
+python -m fxbot.admin_cli close --id 7 --pnl-pct -0.52 --close-time 2026-01-12T10:30:00+00:00
+```
+
+`--profit` is converted with the row's `entry_balance` (`profit / entry_balance * 100`); use `--pnl-pct` if
+the row has none. `--close-time` (ISO-8601, naive = UTC; default now) decides which UTC day and which
+Monday-week the loss is booked on - the same convention as automatic reconciliation. `close` reads the loss
+caps from `config.json` (`--config PATH`) exactly like the live engine, so a loss that crosses the daily or
+weekly cap locks it (and the lock stays latched).
+
+**Fix - the row never reached the broker (phantom/erroneous).**
+
+```
+python -m fxbot.admin_cli abandon --id 7 --reason "order rejected, no position was ever opened"
+```
+
+Marks the row closed (`result = abandoned`, reason stored in `note`) WITHOUT touching the guards. Never use
+this for a trade that actually traded - that would hide a real loss from the loss limits.
+
+Use `--db PATH` to target a specific SQLite file (default: `DB_PATH` from `.env`). Restart the bot afterwards.
+
 ## Known limitations (as of this build)
 
 1. Closed-trade PnL IS reconciled into the daily/weekly loss guards at the start of every pass

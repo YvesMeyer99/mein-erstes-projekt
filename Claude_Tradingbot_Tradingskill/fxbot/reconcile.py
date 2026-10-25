@@ -44,6 +44,13 @@ def _parse_utc(text: str) -> datetime:
     return t.replace(tzinfo=UTC) if t.tzinfo is None else t.astimezone(UTC)
 
 
+def guard_keys(close_utc: datetime) -> tuple[str, str]:
+    """(daily key, weekly key) a close at `close_utc` is booked under: the UTC date of the
+    close and that date's Monday. Shared with the operator CLI so both always agree."""
+    close_date = close_utc.astimezone(UTC).date()
+    return close_date.isoformat(), (close_date - timedelta(days=close_date.weekday())).isoformat()
+
+
 def _match(row: sqlite3.Row, by_position: dict[int, ClosedDeal], pool: list[ClosedDeal],
            taken: set[int], known_tickets: set[int]) -> ClosedDeal | None:
     symbol = row["symbol"].upper()
@@ -116,9 +123,7 @@ def reconcile_closed_trades(
 
         pnl_pct = deal.profit / balance * 100.0
         close_utc = deal.close_time.astimezone(UTC)
-        close_date = close_utc.date()
-        date_key = close_date.isoformat()
-        week_key = (close_date - timedelta(days=close_date.weekday())).isoformat()
+        date_key, week_key = guard_keys(close_utc)
         result = "win" if deal.profit > 0 else "loss" if deal.profit < 0 else "breakeven"
 
         try:

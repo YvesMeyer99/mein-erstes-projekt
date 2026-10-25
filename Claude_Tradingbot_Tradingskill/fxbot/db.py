@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS trades (
     ticket INTEGER,
     closed INTEGER NOT NULL DEFAULT 0,
     close_price REAL,
+    note TEXT,
     UNIQUE(symbol, entry_time)
 );
 
@@ -43,6 +44,7 @@ _TRADES_MIGRATIONS = (
     ("ticket", "INTEGER"),
     ("closed", "INTEGER NOT NULL DEFAULT 0"),
     ("close_price", "REAL"),
+    ("note", "TEXT"),          # operator note (fxbot.admin_cli abandon --reason)
 )
 
 
