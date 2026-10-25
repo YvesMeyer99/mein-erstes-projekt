@@ -100,6 +100,35 @@ def test_block_when_weekly_locked(conn, engine):
     assert not d.ok and any("weekly" in r for r in d.reasons)
 
 
+def test_daily_lock_latches_after_recovery(conn, engine):
+    guard = DailyRiskGuard(conn, 3.0)
+    guard.record_pnl(DATE, -3.0)
+    guard.record_pnl(DATE, 1.0)
+    assert guard.realized_pnl_pct(DATE) == pytest.approx(-2.0)
+    assert guard.is_locked(DATE)
+    assert not run(engine).ok
+
+
+def test_weekly_lock_latches_after_recovery(conn, engine):
+    guard = WeeklyRiskGuard(conn, 6.0)
+    guard.record_pnl(WEEK, -6.0)
+    guard.record_pnl(WEEK, 2.0)
+    assert guard.realized_pnl_pct(WEEK) == pytest.approx(-4.0)
+    assert guard.is_locked(WEEK)
+    assert not run(engine).ok
+
+
+def test_nan_spread_blocks(engine):
+    d = run(engine, spread_points=float("nan"))
+    assert not d.ok and any("spread" in r for r in d.reasons)
+
+
+def test_nan_crv_blocks(engine):
+    from types import SimpleNamespace
+    d = run(engine, signal=SimpleNamespace(crv=float("nan")))
+    assert not d.ok and any("reward" in r for r in d.reasons)
+
+
 def test_block_when_trades_per_day_cap(engine):
     d = run(engine, trades_today=3)
     assert not d.ok and any("trades" in r for r in d.reasons)

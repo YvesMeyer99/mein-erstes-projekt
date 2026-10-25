@@ -60,7 +60,9 @@ class DailyRiskGuard:
 
         hit_loss_limit = realized <= -abs(self.max_daily_risk_pct)
         hit_win_stop = self.daily_win_stop_pct is not None and realized >= self.daily_win_stop_pct
-        is_locked = 1 if (hit_loss_limit or hit_win_stop) else 0
+        # Latch: once locked for a date it stays locked, even if later PnL recovers.
+        already_locked = row is not None and bool(row["is_locked"])
+        is_locked = 1 if (already_locked or hit_loss_limit or hit_win_stop) else 0
 
         self.conn.execute(
             "INSERT INTO daily_risk (date, realized_pnl_pct, is_locked) VALUES (?, ?, ?) "
@@ -96,7 +98,10 @@ class WeeklyRiskGuard:
         else:
             realized = row["realized_pnl_pct"] + pnl_pct
 
-        is_locked = 1 if realized <= -abs(self.max_weekly_risk_pct) else 0
+        # Latch: once locked for a week it stays locked, even if later PnL recovers.
+        hit_loss_limit = realized <= -abs(self.max_weekly_risk_pct)
+        already_locked = row is not None and bool(row["is_locked"])
+        is_locked = 1 if (already_locked or hit_loss_limit) else 0
 
         self.conn.execute(
             "INSERT INTO weekly_risk (week_start_date, realized_pnl_pct, is_locked) VALUES (?, ?, ?) "
@@ -159,7 +164,8 @@ class RiskEngine:
             reasons.append(
                 f"max trades per day reached ({trades_today} >= {self.cfg.max_trades_per_day})"
             )
-        if spread_points > max_spread_points:
+        # Fail closed: negated comparisons so NaN inputs BLOCK instead of passing.
+        if not (spread_points <= max_spread_points):
             reasons.append(f"spread too wide ({spread_points} > {max_spread_points} points)")
         if any(p.symbol == symbol for p in open_positions):
             reasons.append(f"position already open on {symbol}")
@@ -167,7 +173,7 @@ class RiskEngine:
             reasons.append(
                 f"max open positions reached ({len(open_positions)} >= {self.cfg.max_open_positions})"
             )
-        if signal.crv < self.cfg.min_reward_risk:
+        if not (signal.crv >= self.cfg.min_reward_risk):
             reasons.append(f"reward/risk too low ({signal.crv:.2f} < {self.cfg.min_reward_risk})")
         if not (session_open_utc <= now_utc < session_flat_by_utc):
             reasons.append(
