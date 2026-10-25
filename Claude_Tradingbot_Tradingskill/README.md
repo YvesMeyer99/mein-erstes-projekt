@@ -73,7 +73,15 @@ python -m fxbot.backtest_cli --symbol XAUUSD --source csv --file xau.csv --balan
 
 CSV columns: `time,open,high,low,close,volume` (epoch seconds or ISO-8601, UTC). The symbol is
 looked up in `config.json` (override with `--config`). The result prints trade count, win rate,
-average CRV, expectancy, profit factor, max drawdown and TP/SL/flat exit counts.
+average CRV, expectancy, profit factor, max drawdown, TP/SL/flat exit counts and
+`skipped_by_risk` (ORB triggers refused by a risk gate).
+
+By default the backtest applies the config's risk gates so it reflects the live loss limits:
+`min_reward_risk`, `max_trades_per_day` and a latched daily + weekly loss stop
+(`max_daily_loss_pct` / `max_weekly_loss_pct`; once a day or week hits its cap it stays locked,
+0 = off). Pass `--no-risk-gates` for the raw strategy. It does **not** model the spread filter
+(`max_spread_points`; OHLCV bars carry no spread) nor `max_open_positions` (one trade per symbol
+per day, so positions never overlap).
 
 ## Tests
 

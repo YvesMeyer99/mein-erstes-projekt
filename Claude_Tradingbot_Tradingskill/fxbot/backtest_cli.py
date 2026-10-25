@@ -2,6 +2,10 @@
 
     python -m fxbot.backtest_cli --symbol EURUSD --source csv --file eurusd.csv
     python -m fxbot.backtest_cli --symbol EURUSD --source mt5 --from 2026-07-01 --to 2026-10-01
+    python -m fxbot.backtest_cli --symbol EURUSD --source csv --file eurusd.csv --no-risk-gates
+
+Risk gates (min_reward_risk, max_trades_per_day, latched daily/weekly loss stop) are ON by
+default; --no-risk-gates runs the raw strategy.
 """
 import argparse
 import sys
@@ -33,6 +37,7 @@ def format_result(symbol: str, n_bars: int, r: BacktestResult) -> str:
             f"  tp_hits:       {r.tp_hits}",
             f"  sl_hits:       {r.sl_hits}",
             f"  flat_hits:     {r.flat_hits}",
+            f"  skipped_by_risk: {r.skipped_by_risk}",
             f"  final_equity:  {r.equity_curve[-1]:.2f} (start {r.equity_curve[0]:.2f})",
         ]
     )
@@ -50,6 +55,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument(
         "--contract-size", type=float, default=None,
         help="overrides the symbol's contract_size from the config (e.g. 100 for XAUUSD)",
+    )
+    p.add_argument(
+        "--no-risk-gates", action="store_true",
+        help="disable the config risk gates (min_reward_risk, max_trades_per_day, daily/weekly "
+             "loss stop) and run the raw strategy",
     )
     args = p.parse_args(argv)
 
@@ -80,7 +90,10 @@ def main(argv: list[str] | None = None) -> int:
             bars = bars_from_mt5(client, sym.name, cfg.timeframe, _parse_day(args.start), _parse_day(args.end))
 
         contract_size = args.contract_size if args.contract_size is not None else sym.contract_size
-        result = run_backtest(bars, sym, starting_balance=args.balance, contract_size=contract_size)
+        result = run_backtest(
+            bars, sym, starting_balance=args.balance, contract_size=contract_size,
+            apply_risk_gates=not args.no_risk_gates,
+        )
     except (ValueError, OSError, RuntimeError) as exc:
         return fail(str(exc))
 

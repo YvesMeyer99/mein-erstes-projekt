@@ -1,8 +1,23 @@
-"""ORB backtester: one opening-range-breakout trade per session day over 5-minute bars."""
+"""ORB backtester: one opening-range-breakout trade per session day over 5-minute bars.
+
+By default (`apply_risk_gates=True`) the backtest applies the same config loss limits the
+live engine enforces, so results are not flattering: the `min_reward_risk` filter,
+`max_trades_per_day`, and a latched daily + weekly loss stop (`max_daily_loss_pct` /
+`max_weekly_loss_pct`, 0 = off). PnL is bucketed with `reconcile.guard_keys` (UTC day,
+Monday-start week) exactly like live, and a locked day/week stays locked even if a later
+win lifts the running total. Triggers refused by a gate are counted in
+`BacktestResult.skipped_by_risk` and not traded.
+
+NOT modelled: the spread filter (`max_spread_points`; OHLCV bars carry no spread) and
+`max_open_positions` (one trade per symbol per day, so positions never overlap).
+`apply_risk_gates=False` gives the raw strategy with no skipping.
+"""
+from collections import defaultdict
 from dataclasses import dataclass
 
-from fxbot.config import SymbolConfig
+from fxbot.config import RiskConfig, SymbolConfig
 from fxbot.domain import Bar, Direction, Signal
+from fxbot.reconcile import guard_keys
 from fxbot.risk import calculate_lot_size
 from fxbot.sessions import group_by_session_day, session_slots
 from fxbot.strategy import detect_orb_trigger, plan_exit
@@ -20,6 +35,42 @@ class BacktestResult:
     tp_hits: int
     sl_hits: int
     flat_hits: int
+    skipped_by_risk: int = 0  # ORB triggers not traded because a risk gate refused them
+
+
+class RiskLatch:
+    """In-memory twin of the live DailyRiskGuard/WeeklyRiskGuard (no SQLite).
+
+    A day/week locks once its booked PnL % reaches `<= -max_*_loss_pct` and then STAYS
+    locked even if later PnL recovers. A cap of 0 switches that guard off (as in config.py).
+    Also counts trades per day for `max_trades_per_day`.
+    """
+
+    def __init__(self, risk: RiskConfig):
+        self.risk = risk
+        self.daily_pnl_pct: dict[str, float] = defaultdict(float)
+        self.weekly_pnl_pct: dict[str, float] = defaultdict(float)
+        self.locked_days: set[str] = set()
+        self.locked_weeks: set[str] = set()
+        self.trades_per_day: dict[str, int] = defaultdict(int)
+
+    def is_blocked(self, day_key: str, week_key: str) -> bool:
+        return (
+            day_key in self.locked_days
+            or week_key in self.locked_weeks
+            or self.trades_per_day[day_key] >= self.risk.max_trades_per_day
+        )
+
+    def record(self, day_key: str, week_key: str, pnl_pct: float) -> None:
+        self.trades_per_day[day_key] += 1
+        self.daily_pnl_pct[day_key] += pnl_pct
+        self.weekly_pnl_pct[week_key] += pnl_pct
+        daily_cap = abs(self.risk.max_daily_loss_pct)
+        weekly_cap = abs(self.risk.max_weekly_loss_pct)
+        if daily_cap > 0 and self.daily_pnl_pct[day_key] <= -daily_cap:
+            self.locked_days.add(day_key)
+        if weekly_cap > 0 and self.weekly_pnl_pct[week_key] <= -weekly_cap:
+            self.locked_weeks.add(week_key)
 
 
 def _profit_factor(pnls: list) -> float | None:
@@ -70,6 +121,7 @@ def run_backtest(
     cfg: SymbolConfig,
     starting_balance: float = 10_000.0,
     contract_size: float = 100_000.0,
+    apply_risk_gates: bool = True,
 ) -> BacktestResult:
     sess, strat = cfg.session, cfg.strategy
     n_slots = session_slots(sess.open, sess.flat_by)
@@ -78,6 +130,8 @@ def run_backtest(
     balance = starting_balance
     equity_curve = [balance]
     trades = []
+    latch = RiskLatch(cfg.risk)
+    skipped_by_risk = 0
 
     for day in sorted(days):
         day_bars = days[day]
@@ -95,6 +149,14 @@ def run_backtest(
             session_bars=known,
             stop_param=strat.stop_param,
         )
+        day_key, week_key = guard_keys(trigger.trigger_time)
+        if apply_risk_gates and (
+            signal.crv < cfg.risk.min_reward_risk or latch.is_blocked(day_key, week_key)
+        ):
+            skipped_by_risk += 1
+            continue
+
+        balance_before = balance
         lot = calculate_lot_size(
             balance=balance,
             risk_pct=cfg.risk.risk_per_trade_pct,
@@ -115,6 +177,12 @@ def run_backtest(
         )
         pnl = price_diff * lot * contract_size
         balance += pnl
+        if apply_risk_gates:
+            if balance_before > 0:
+                pnl_pct = pnl / balance_before * 100.0
+            else:  # wiped-out account: no meaningful base, book a full loss / nothing
+                pnl_pct = -100.0 if pnl < 0 else 0.0
+            latch.record(day_key, week_key, pnl_pct)
         equity_curve.append(balance)
         trades.append({"pnl": pnl, "crv": signal.crv, "reason": reason})
 
@@ -131,4 +199,5 @@ def run_backtest(
         tp_hits=sum(1 for t in trades if t["reason"] == "tp"),
         sl_hits=sum(1 for t in trades if t["reason"] == "sl"),
         flat_hits=sum(1 for t in trades if t["reason"] == "flat"),
+        skipped_by_risk=skipped_by_risk,
     )

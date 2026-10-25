@@ -269,9 +269,13 @@ def _capture_contract_size(monkeypatch):
     seen = {}
     real = backtest_cli.run_backtest
 
-    def spy(bars, sym, starting_balance=10_000.0, contract_size=100_000.0):
+    def spy(bars, sym, starting_balance=10_000.0, contract_size=100_000.0, apply_risk_gates=True):
         seen["contract_size"] = contract_size
-        return real(bars, sym, starting_balance=starting_balance, contract_size=contract_size)
+        seen["apply_risk_gates"] = apply_risk_gates
+        return real(
+            bars, sym, starting_balance=starting_balance, contract_size=contract_size,
+            apply_risk_gates=apply_risk_gates,
+        )
 
     monkeypatch.setattr(backtest_cli, "run_backtest", spy)
     return seen
@@ -316,3 +320,25 @@ def test_format_result_handles_undefined_profit_factor():
     )
     text = backtest_cli.format_result("EURUSD", 10, r)
     assert "profit_factor: n/a" in text and "inf" not in text
+
+
+def test_backtest_cli_risk_gates_on_by_default(tmp_path, monkeypatch, capsys):
+    csv_path = tmp_path / "eur.csv"
+    _write_csv(csv_path)
+    seen = _capture_contract_size(monkeypatch)
+    rc = backtest_cli.main(
+        ["--symbol", "EURUSD", "--source", "csv", "--file", str(csv_path), "--config", CONFIG_EXAMPLE]
+    )
+    assert rc == 0 and seen["apply_risk_gates"] is True
+    assert "skipped_by_risk" in capsys.readouterr().out
+
+
+def test_backtest_cli_no_risk_gates_flag_disables_gates(tmp_path, monkeypatch):
+    csv_path = tmp_path / "eur.csv"
+    _write_csv(csv_path)
+    seen = _capture_contract_size(monkeypatch)
+    rc = backtest_cli.main(
+        ["--symbol", "EURUSD", "--source", "csv", "--file", str(csv_path), "--config", CONFIG_EXAMPLE,
+         "--no-risk-gates"]
+    )
+    assert rc == 0 and seen["apply_risk_gates"] is False
