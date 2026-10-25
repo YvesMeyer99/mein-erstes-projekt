@@ -1,0 +1,26 @@
+{
+  "timeframe": "M5",
+  "risk": {
+    "risk_per_trade_pct": 1.0,
+    "max_daily_loss_pct": 3.0,
+    "max_weekly_loss_pct": 6.0,
+    "max_trades_per_day": 3,
+    "min_reward_risk": 1.5,
+    "max_open_positions": 3
+  },
+  "session": { "timezone": "Europe/London", "open": "08:00", "flat_by": "20:00" },
+  "strategy": {
+    "or_minutes": 15,
+    "stop_rule": "or_mid",
+    "target_r": 2.0,
+    "allow_short": true,
+    "max_spread_points": 30
+  },
+  "timemachine_filter": { "enabled": false, "min_p_green": 0.5, "replays": 10000, "seed": 19 },
+  "symbols": [
+    { "name": "EURUSD", "enabled": true },
+    { "name": "GBPUSD", "enabled": true },
+    { "name": "XAUUSD", "enabled": true, "overrides": { "or_minutes": 30, "max_spread_points": 50 } },
+    { "name": "XAGUSD", "enabled": false }
+  ]
+}
