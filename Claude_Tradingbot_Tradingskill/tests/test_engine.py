@@ -1,4 +1,5 @@
 import random
+import sqlite3
 from dataclasses import replace
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -81,7 +82,8 @@ def _trading_cfg(sym: SymbolConfig, tm: TMConfig | None = None) -> TradingConfig
 def _make(bars: list[Bar], sym: SymbolConfig | None = None, tm: TMConfig | None = None,
           spread: float = 5.0, balance: float = 10_000.0):
     sym = sym or _symbol_cfg()
-    client = FakeMT5Client({"EURUSD": bars}, balance=balance, symbol_info=INFO, spread_points=spread)
+    client = FakeMT5Client({"EURUSD": bars}, balance=balance, symbol_info=INFO, spread_points=spread,
+                          server_time=NOW_AFTER_BREAK)
     conn = init_db(":memory:")
     return LiveEngine(client, conn, _trading_cfg(sym, tm)), client, conn, sym
 
@@ -98,11 +100,11 @@ def test_places_order_on_clean_breakout():
     sent = client.sent_orders[-1]
     assert sent.symbol == "EURUSD" and sent.direction == Direction.BUY
     assert sent.sl == pytest.approx(1.1005) and sent.tp == pytest.approx(1.1050)
-    assert sent.lot == pytest.approx(0.66)  # 1% of 10k over 0.0015 x 100k
+    assert sent.lot == pytest.approx(0.65)  # 1% of 10k over live risk 0.001525 (ask = 1.1020 + half the 5pt spread)
     row = conn.execute("SELECT * FROM trades").fetchall()
     assert len(row) == 1
     assert row[0]["symbol"] == "EURUSD" and row[0]["direction"] == "buy"
-    assert row[0]["lot"] == pytest.approx(0.66)
+    assert row[0]["lot"] == pytest.approx(0.65)
     assert row[0]["entry_price"] == pytest.approx(1.1020)
 
 
@@ -200,6 +202,72 @@ def test_price_already_past_target_is_blocked():
     assert client.sent_orders == []
 
 
+def test_lot_is_sized_on_live_price_not_planned_entry():
+    engine, client, _, sym = _make(BREAKOUT)
+    client.get_current_price = lambda symbol: (1.1021, 1.1022)  # ask drifted 2 pips toward TP
+    out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    assert out.action == "placed", out.reasons
+    # live risk 0.0017 -> 100 / 170 = 0.588 -> 0.58 (planned-entry sizing would give 0.66)
+    assert client.sent_orders[-1].lot == pytest.approx(0.58)
+
+
+def test_drift_that_ruins_live_reward_risk_is_blocked():
+    engine, client, _, sym = _make(BREAKOUT)
+    client.get_current_price = lambda symbol: (1.1029, 1.1030)  # live RR 0.8 < 1.5
+    out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    assert out.action == "blocked"
+    assert any("live reward/risk" in r for r in out.reasons)
+    assert client.sent_orders == []
+
+
+class _InsertFailsConn:
+    """sqlite connection proxy whose trades INSERT fails."""
+    def __init__(self, conn):
+        self._conn = conn
+
+    def execute(self, sql, *a):
+        if sql.lstrip().upper().startswith("INSERT INTO TRADES"):
+            raise sqlite3.OperationalError("disk I/O error")
+        return self._conn.execute(sql, *a)
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_failed_trade_row_latches_symbol_for_the_day():
+    engine, client, conn, sym = _make(BREAKOUT)
+    engine.conn = _InsertFailsConn(conn)
+    out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    assert out.action == "placed" and any("not recorded" in r for r in out.reasons)
+    for pos in client.get_open_positions("EURUSD"):  # position gone (e.g. SL hit): only the latch is left
+        client.close_position(pos.ticket)
+    again = engine.run_symbol_once(sym, NOW_AFTER_BREAK + timedelta(minutes=5))
+    assert again.action == "blocked" and any("already attempted" in r for r in again.reasons)
+    assert len(client.sent_orders) == 1
+
+
+def test_send_order_raising_latches_symbol_for_the_day():
+    engine, client, _, sym = _make(BREAKOUT)
+    calls = []
+
+    def boom(*a, **k):
+        calls.append(1)
+        raise RuntimeError("connection lost after accept")
+
+    client.send_order = boom
+    with pytest.raises(RuntimeError):
+        engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    again = engine.run_symbol_once(sym, NOW_AFTER_BREAK + timedelta(minutes=5))
+    assert again.action == "blocked"
+    assert len(calls) == 1
+
+
+def test_next_day_is_not_latched():
+    engine, _, _, sym = _make(BREAKOUT)
+    engine._attempted.add(("EURUSD", date(2026, 1, 9)))
+    assert engine.run_symbol_once(sym, NOW_AFTER_BREAK).action == "placed"
+
+
 def test_rejected_order_is_reported_not_recorded():
     from fxbot.mt5_types import OrderResult
     engine, client, conn, sym = _make(BREAKOUT)
@@ -227,13 +295,29 @@ def test_timemachine_filter_passes_good_odds():
     assert len(client.sent_orders) == 1
 
 
-def test_timemachine_with_too_little_history_does_not_filter():
+def test_timemachine_with_too_little_history_fails_closed():
     bars = _history(3) + BREAKOUT  # < 20 sessions -> run_time_machine raises
-    tm = TMConfig(enabled=True, min_p_green=1.01, replays=200, seed=19)
+    tm = TMConfig(enabled=True, min_p_green=0.0, replays=200, seed=19)  # even a 0.0 bar must not pass
     engine, client, _, sym = _make(bars, tm=tm)
     out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
-    assert out.action == "placed"
+    assert out.action == "filtered"
     assert any("time machine" in r.lower() for r in out.reasons)
+    assert client.sent_orders == []
+
+
+def test_timemachine_unexpected_error_propagates():
+    bars = _history(25) + BREAKOUT
+    tm = TMConfig(enabled=True, min_p_green=0.0, replays=200, seed=19)
+    engine, client, _, sym = _make(bars, tm=tm)
+    import fxbot.engine as eng
+    orig = eng.run_time_machine
+    eng.run_time_machine = lambda *a, **k: (_ for _ in ()).throw(KeyError("boom"))
+    try:
+        with pytest.raises(KeyError):
+            engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    finally:
+        eng.run_time_machine = orig
+    assert client.sent_orders == []
 
 
 def test_flat_by_closes_open_position():
@@ -243,6 +327,27 @@ def test_flat_by_closes_open_position():
     out = engine.run_symbol_once(sym, NOW_AT_FLAT_BY)
     assert out.action == "flat_close"
     assert client.get_open_positions("EURUSD") == []
+
+
+@pytest.mark.parametrize("now", [
+    datetime(2026, 1, 12, 7, 30, tzinfo=UTC),   # pre-open today
+    datetime(2026, 1, 12, 12, 0, tzinfo=UTC),   # mid-session today
+])
+def test_position_from_yesterday_is_closed(now):
+    engine, client, _, sym = _make(BREAKOUT)
+    client.server_time = datetime(2026, 1, 9, 10, 0, tzinfo=UTC)  # opened on an earlier session day
+    client.send_order("EURUSD", Direction.BUY, 0.1, 1.09, 1.12)
+    out = engine.run_symbol_once(sym, now)
+    assert out.action == "flat_close"
+    assert client.get_open_positions("EURUSD") == []
+
+
+def test_position_before_open_today_is_closed_even_if_opened_today():
+    engine, client, _, sym = _make(BREAKOUT)
+    client.server_time = datetime(2026, 1, 12, 7, 0, tzinfo=UTC)
+    client.send_order("EURUSD", Direction.BUY, 0.1, 1.09, 1.12)
+    out = engine.run_symbol_once(sym, datetime(2026, 1, 12, 7, 30, tzinfo=UTC))
+    assert out.action == "flat_close"
 
 
 def test_before_flat_by_open_position_is_left_alone():

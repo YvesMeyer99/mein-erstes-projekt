@@ -13,9 +13,17 @@ Design notes / decisions:
     is fresh (on the last closed bar or the one before). A stale trigger means the
     bot was down or an earlier poll was missed; chasing it at market would enter
     far from the planned entry/stop/target, so it is skipped ("no_trigger").
-  * Time Machine failure (e.g. fewer than 20 prior sessions) is NOT treated as a
-    filter hit: the trade proceeds to the risk gate and the reason is recorded.
-    A p_green that is NaN fails closed (filtered).
+  * Time Machine fails CLOSED: with the filter enabled, a ValueError from
+    run_time_machine (e.g. fewer than 20 prior sessions) or a NaN p_green means
+    "filtered" - no order. Other exception types propagate.
+  * An in-memory per-(symbol, session-day) "attempted" latch is set right before
+    send_order, so a failed trades-row write or an exception after the broker
+    accepted the order can never produce a second order the same day. (Lost on
+    process restart; the open-position check is then the remaining guard.)
+  * Sizing and the reward:risk check use the LIVE fill price (ask/bid), not the
+    trigger-bar close.
+  * Positions that should already be flat (after flat-by, before the open, or
+    opened on an earlier session day) are closed first.
   * Positions are counted across all enabled symbols so `max_open_positions`
     is a portfolio limit, not a per-symbol one.
 """
@@ -68,6 +76,7 @@ class LiveEngine:
         self.client = client
         self.conn = conn
         self.cfg = cfg
+        self._attempted: set[tuple[str, date]] = set()
 
     # ------------------------------------------------------------------ public
 
@@ -93,9 +102,20 @@ class LiveEngine:
         today = session_day(now_utc, sym.session.timezone)
         open_utc, flat_utc = _session_window_utc(sym, today)
 
-        # 1. flat-by: close what is open, never open anything new
+        # 1. positions that should already be flat: close them, never open anything new
+        stale = [
+            p for p in client.get_open_positions(resolved)
+            if now_utc >= flat_utc or now_utc < open_utc
+            or session_day(self._aware(p.open_time), sym.session.timezone) < today
+        ]
+        if stale:
+            return self._flat_close(sym, stale)
         if now_utc >= flat_utc:
-            return self._flat_close(sym, resolved, now_utc)
+            return TradeOutcome(sym.name, "no_trigger", ["at/after flat-by; no open position"])
+        if (resolved, today) in self._attempted:
+            return TradeOutcome(
+                sym.name, "blocked", [f"an order was already attempted for {resolved} on {today}"]
+            )
 
         # 2. closed bars only
         n_slots = session_slots(sym.session.open, sym.session.flat_by)
@@ -139,8 +159,10 @@ class LiveEngine:
                 result = run_time_machine(
                     bars, today, trigger, signal, sym, replays=tm.replays, seed=tm.seed
                 )
-            except ValueError as exc:
-                notes.append(f"time machine unavailable, trade not filtered: {exc}")
+            except ValueError as exc:  # fail closed: filter on but cannot evaluate
+                return TradeOutcome(
+                    sym.name, "filtered", [f"time machine unavailable (insufficient history?): {exc}"]
+                )
             else:
                 p_green = result["p_green"]
                 if not (p_green >= tm.min_p_green):  # NaN fails closed
@@ -179,10 +201,16 @@ class LiveEngine:
                 [f"market price {price} outside planned stop/target range ({lo}, {hi})"],
             )
 
-        # 8. size
+        # 8. size on the LIVE price (the order goes to market, not at signal.entry)
+        sl_distance = abs(price - signal.sl)
+        live_rr = abs(signal.tp - price) / sl_distance
+        if not (live_rr >= sym.risk.min_reward_risk):
+            return TradeOutcome(
+                sym.name, "blocked",
+                [f"live reward/risk too low ({live_rr:.2f} < {sym.risk.min_reward_risk}) at price {price}"],
+            )
         balance = client.get_account_balance()
         info = client.get_symbol_info(resolved)
-        sl_distance = abs(signal.entry - signal.sl)
         risk_pct = sym.risk.risk_per_trade_pct
         lot = calculate_lot_size(
             balance, risk_pct, sl_distance,
@@ -197,6 +225,8 @@ class LiveEngine:
             )
 
         # 9. order (only reachable after RiskEngine PASS)
+        # latch BEFORE the call: if it raises after the broker accepted, we must not retry today
+        self._attempted.add((resolved, today))
         order = client.send_order(resolved, signal.direction, lot, signal.sl, signal.tp)
         if not order.success:
             return TradeOutcome(sym.name, "blocked", [f"order rejected: {order.comment}"], order)
@@ -222,17 +252,18 @@ class LiveEngine:
             positions.extend(self.client.get_open_positions(name))
         return positions
 
-    def _flat_close(self, sym: SymbolConfig, resolved: str, now_utc: datetime) -> TradeOutcome:
-        positions = self.client.get_open_positions(resolved)
-        if not positions:
-            return TradeOutcome(sym.name, "no_trigger", ["at/after flat-by; no open position"])
+    @staticmethod
+    def _aware(t: datetime) -> datetime:
+        return t if t.tzinfo is not None and t.utcoffset() is not None else t.replace(tzinfo=UTC)
+
+    def _flat_close(self, sym: SymbolConfig, positions: list[Position]) -> TradeOutcome:
         failed = [p.ticket for p in positions if not self.client.close_position(p.ticket)]
         if failed:
             return TradeOutcome(
                 sym.name, "blocked", [f"flat-by close failed for ticket(s) {failed}"]
             )
         return TradeOutcome(
-            sym.name, "flat_close", [f"closed {len(positions)} position(s) at flat-by"]
+            sym.name, "flat_close", [f"closed {len(positions)} position(s) that should be flat"]
         )
 
     def _record_trade(
