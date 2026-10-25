@@ -456,3 +456,97 @@ def test_run_all_once_isolates_symbol_errors():
     outs = engine.run_all_once(NOW_AFTER_BREAK)
     assert [(o.symbol, o.action) for o in outs] == [("XAUUSD", "blocked"), ("EURUSD", "placed")]
     assert any("error" in r for r in outs[0].reasons)
+
+
+# ------------------------------------------------------------------ closed-trade reconciliation
+
+from fxbot.mt5_types import ClosedDeal
+
+_SEED_TRADE = (
+    "INSERT INTO trades (symbol, entry_time, direction, entry_price, sl, tp, lot, crv, entry_balance, ticket) "
+    "VALUES ('EURUSD', '2026-01-12T07:00:00+00:00', 'buy', 1.1, 1.09, 1.12, 0.5, 2.0, 10000.0, 77)"
+)
+
+
+def _losing_deal(profit: float) -> ClosedDeal:
+    return ClosedDeal(
+        position_id=77, symbol="EURUSD", profit=profit, volume=0.5, close_price=1.09,
+        close_time=datetime(2026, 1, 12, 8, 10, tzinfo=UTC),
+    )
+
+
+def _seed_closed_loss(conn, client, profit: float) -> None:
+    conn.execute(_SEED_TRADE)
+    conn.commit()
+    client.closed_deals.append(_losing_deal(profit))
+
+
+def test_placed_trade_row_records_the_broker_ticket():
+    engine, client, conn, sym = _make(BREAKOUT)
+    out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    assert out.action == "placed"
+    row = conn.execute("SELECT ticket, closed FROM trades").fetchone()
+    assert row["ticket"] == out.order.ticket and row["closed"] == 0
+
+
+def test_run_all_once_without_closed_trades_still_places():
+    engine, client, conn, sym = _make(BREAKOUT)
+    outs = engine.run_all_once(NOW_AFTER_BREAK)
+    assert outs[0].action == "placed"
+    assert engine.last_reconciled == []
+
+
+def test_losing_close_locks_day_and_blocks_entry_in_the_same_pass():
+    engine, client, conn, sym = _make(BREAKOUT)
+    _seed_closed_loss(conn, client, -400.0)  # -4% > the 3% daily cap
+    outs = engine.run_all_once(NOW_AFTER_BREAK)
+    assert outs[0].action == "blocked"
+    assert any("daily loss limit" in r for r in outs[0].reasons)
+    assert client.sent_orders == []
+    assert conn.execute("SELECT is_locked FROM daily_risk WHERE date='2026-01-12'").fetchone()["is_locked"] == 1
+    assert [r["pnl_pct"] for r in engine.last_reconciled] == [pytest.approx(-4.0)]
+
+
+def test_small_loss_does_not_block_entry():
+    engine, client, conn, sym = _make(BREAKOUT)
+    _seed_closed_loss(conn, client, -100.0)  # -1%
+    outs = engine.run_all_once(NOW_AFTER_BREAK)
+    assert outs[0].action == "placed", outs[0].reasons
+    assert conn.execute("SELECT realized_pnl_pct FROM daily_risk").fetchone()[0] == pytest.approx(-1.0)
+
+
+def test_engine_reconciles_with_the_strictest_symbol_cap():
+    tight = replace(_symbol_cfg(), risk=RiskConfig(max_daily_loss_pct=2.0))
+    engine, client, conn, sym = _make(BREAKOUT, sym=tight)
+    _seed_closed_loss(conn, client, -250.0)  # -2.5%: under the default 3%, over this symbol's 2%
+    outs = engine.run_all_once(NOW_AFTER_BREAK)
+    assert outs[0].action == "blocked"
+    assert client.sent_orders == []
+
+
+def test_repeated_passes_do_not_double_count_a_close():
+    engine, client, conn, sym = _make(BREAKOUT)
+    _seed_closed_loss(conn, client, -100.0)
+    engine.run_all_once(NOW_AFTER_BREAK)
+    engine.run_all_once(NOW_AFTER_BREAK + timedelta(minutes=5))
+    assert conn.execute("SELECT realized_pnl_pct FROM daily_risk").fetchone()[0] == pytest.approx(-1.0)
+    assert engine.last_reconciled == []
+
+
+def test_reconcile_failure_blocks_new_entries_but_not_the_loop():
+    engine, client, conn, sym = _make(BREAKOUT)
+    conn.execute(_SEED_TRADE)  # an open row, so reconciliation has to ask the broker
+    conn.commit()
+
+    def boom(start, end):
+        raise RuntimeError("history unavailable")
+
+    client.get_closed_deals = boom
+    outs = engine.run_all_once(NOW_AFTER_BREAK)
+    assert outs[0].action == "blocked"
+    assert any("reconcil" in r for r in outs[0].reasons)
+    assert client.sent_orders == []
+    # recovers on the next pass once the history call works again
+    del client.get_closed_deals
+    outs = engine.run_all_once(NOW_AFTER_BREAK + timedelta(minutes=1))
+    assert outs[0].action == "placed", outs[0].reasons

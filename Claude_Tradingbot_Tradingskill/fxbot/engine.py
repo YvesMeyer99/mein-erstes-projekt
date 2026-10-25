@@ -29,6 +29,13 @@ Design notes / decisions:
     opened on an earlier session day) are closed first.
   * Positions are counted across all enabled symbols so `max_open_positions`
     is a portfolio limit, not a per-symbol one.
+  * Closed trades are reconciled at the START of every `run_all_once` (before any
+    entry logic): realized P&L from the broker's deal history is fed into the daily
+    and weekly guards, so a loss limit tripped by a stop-out blocks new entries in
+    that same pass. The guards are conn-backed, so the RiskEngine sees the lock
+    through the shared DB. The reconciliation guards use the STRICTEST loss caps of
+    the enabled symbols (the lock is portfolio-wide). If reconciliation itself fails,
+    new entries are blocked for that pass (fail closed); flat-by closes still run.
 """
 import logging
 import sqlite3
@@ -36,10 +43,13 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fxbot.config import SymbolConfig, TradingConfig
+from fxbot.config import RiskConfig, SymbolConfig, TradingConfig
 from fxbot.domain import Direction, Signal
 from fxbot.mt5_types import MT5Client, OrderResult, Position
-from fxbot.risk import RiskEngine, calculate_lot_size, count_trades_today
+from fxbot.reconcile import reconcile_closed_trades
+from fxbot.risk import (
+    DailyRiskGuard, RiskEngine, WeeklyRiskGuard, calculate_lot_size, count_trades_today,
+)
 from fxbot.sessions import SLOT_MINUTES, group_by_session_day, session_day, session_slots
 from fxbot.strategy import detect_orb_trigger, plan_exit
 from fxbot.timemachine import run_time_machine
@@ -80,10 +90,45 @@ class LiveEngine:
         self.conn = conn
         self.cfg = cfg
         self._attempted: set[tuple[str, date]] = set()
+        daily_cap, weekly_cap = self._strictest_loss_caps(cfg)
+        self.daily_guard = DailyRiskGuard(conn, daily_cap)
+        self.weekly_guard = WeeklyRiskGuard(conn, weekly_cap)
+        self.last_reconciled: list[dict] = []
+        self._reconcile_ok = True
+
+    @staticmethod
+    def _strictest_loss_caps(cfg: TradingConfig) -> tuple[float, float]:
+        """Smallest positive daily/weekly loss cap among enabled symbols (a cap of 0 means
+        "off" for the config check, so it is ignored); RiskConfig defaults if none is set."""
+        enabled = [s.risk for s in cfg.symbols if s.enabled]
+        default = RiskConfig()
+
+        def strictest(values: list[float], fallback: float) -> float:
+            positive = [v for v in values if v > 0]
+            return min(positive) if positive else fallback
+
+        return (
+            strictest([r.max_daily_loss_pct for r in enabled], default.max_daily_loss_pct),
+            strictest([r.max_weekly_loss_pct for r in enabled], default.max_weekly_loss_pct),
+        )
 
     # ------------------------------------------------------------------ public
 
+    def reconcile(self, now_utc: datetime) -> list[dict]:
+        """Feed closed-trade P&L into the daily/weekly guards (see fxbot.reconcile)."""
+        return reconcile_closed_trades(
+            self.client, self.conn, self.daily_guard, self.weekly_guard, now_utc
+        )
+
     def run_all_once(self, now_utc: datetime) -> list[TradeOutcome]:
+        # reconcile FIRST so a freshly tripped lock blocks this pass's entries
+        self.last_reconciled = []
+        self._reconcile_ok = True
+        try:
+            self.last_reconciled = self.reconcile(now_utc)
+        except Exception:  # fail closed for entries: the loss guards may be stale
+            log.exception("closed-trade reconciliation failed; blocking new entries this pass")
+            self._reconcile_ok = False
         outcomes: list[TradeOutcome] = []
         for sym in self.cfg.symbols:
             if not sym.enabled:
@@ -175,6 +220,11 @@ class LiveEngine:
                     )
 
         # 6. hard risk gate
+        if not self._reconcile_ok:
+            return TradeOutcome(
+                sym.name, "blocked",
+                ["closed-trade reconciliation failed; loss guards may be stale - no new entries"],
+            )
         server_date = now_utc.date().isoformat()
         week_start = (now_utc.date() - timedelta(days=now_utc.weekday())).isoformat()
         open_positions = self._all_open_positions(resolved)
@@ -235,7 +285,7 @@ class LiveEngine:
             # a clean rejection (e.g. requote) placed nothing: free the symbol to retry next poll
             self._attempted.discard((resolved, today))
             return TradeOutcome(sym.name, "blocked", [f"order rejected: {order.comment}"], order)
-        self._record_trade(resolved, now_utc, signal, lot, balance, notes)
+        self._record_trade(resolved, now_utc, signal, lot, balance, notes, order.ticket)
         return TradeOutcome(sym.name, "placed", notes, order)
 
     # ----------------------------------------------------------------- helpers
@@ -273,14 +323,14 @@ class LiveEngine:
 
     def _record_trade(
         self, resolved: str, now_utc: datetime, signal: Signal, lot: float,
-        balance: float, notes: list[str],
+        balance: float, notes: list[str], ticket: int | None = None,
     ) -> None:
         try:
             self.conn.execute(
-                "INSERT INTO trades (symbol, entry_time, direction, entry_price, sl, tp, lot, crv, entry_balance) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO trades (symbol, entry_time, direction, entry_price, sl, tp, lot, crv, "
+                "entry_balance, ticket) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (resolved, now_utc.isoformat(), signal.direction.value, signal.entry,
-                 signal.sl, signal.tp, lot, signal.crv, balance),
+                 signal.sl, signal.tp, lot, signal.crv, balance, ticket),
             )
             self.conn.commit()
         except sqlite3.Error as exc:  # the order is already live; surface, don't raise

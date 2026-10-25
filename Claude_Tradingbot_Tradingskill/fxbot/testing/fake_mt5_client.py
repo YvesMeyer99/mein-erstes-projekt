@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 from fxbot.domain import Bar, Direction
 from fxbot.mt5_client import resolve_symbol_in
-from fxbot.mt5_types import OrderResult, Position, SymbolInfo
+from fxbot.mt5_types import ClosedDeal, OrderResult, Position, SymbolInfo
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,7 @@ class FakeMT5Client:
         symbol_info: SymbolInfo,
         spread_points: float = 0.0,
         server_time: datetime | None = None,
+        closed_deals: list[ClosedDeal] | None = None,
     ):
         self.bars_by_symbol = bars_by_symbol
         self.balance = balance
@@ -35,6 +36,7 @@ class FakeMT5Client:
         self.spread_points = spread_points
         self.server_time = server_time or datetime(2026, 1, 1, tzinfo=timezone.utc)
         self.sent_orders: list[SentOrder] = []
+        self.closed_deals: list[ClosedDeal] = list(closed_deals or [])
         self._positions: dict[int, Position] = {}
         self._next_ticket = 1
         self._connected = False
@@ -119,3 +121,6 @@ class FakeMT5Client:
             return False
         self._positions[ticket] = replace(pos, sl=new_sl)
         return True
+
+    def get_closed_deals(self, start: datetime, end: datetime) -> list[ClosedDeal]:
+        return [d for d in self.closed_deals if start <= d.close_time <= end]

@@ -100,3 +100,16 @@ def test_resolve_symbol_matches_broker_suffix():
     c = FakeMT5Client({"XAUUSD.m": _bars()}, balance=10_000, symbol_info=info)
     assert c.resolve_symbol("XAUUSD") == "XAUUSD.m"
     assert c.resolve_symbol("xauusd.m") == "XAUUSD.m"
+
+
+def test_get_closed_deals_returns_only_deals_in_range():
+    from fxbot.mt5_types import ClosedDeal
+
+    def deal(pid, hour):
+        return ClosedDeal(pid, "EURUSD", -10.0, datetime(2026, 1, 1, hour, tzinfo=timezone.utc), 0.1, 1.1)
+
+    c = _client(closed_deals=[deal(1, 1), deal(2, 5), deal(3, 9)])
+    start = datetime(2026, 1, 1, 2, tzinfo=timezone.utc)
+    end = datetime(2026, 1, 1, 9, tzinfo=timezone.utc)
+    assert [d.position_id for d in c.get_closed_deals(start, end)] == [2, 3]
+    assert _client().get_closed_deals(start, end) == []

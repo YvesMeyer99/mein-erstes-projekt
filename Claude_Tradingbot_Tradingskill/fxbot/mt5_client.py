@@ -16,7 +16,7 @@ import os
 import time
 from datetime import datetime, timedelta, timezone
 from fxbot.domain import Bar, Direction
-from fxbot.mt5_types import SymbolInfo, Position, OrderResult
+from fxbot.mt5_types import ClosedDeal, SymbolInfo, Position, OrderResult
 
 try:
     import MetaTrader5 as mt5
@@ -96,6 +96,55 @@ def _row_to_bar(r, server_utc_offset_seconds: int) -> Bar:
         open=r["open"], high=r["high"], low=r["low"], close=r["close"],
         volume=r["tick_volume"],
     )
+
+
+# MT5 ENUM_DEAL_ENTRY / ENUM_DEAL_TYPE values, hardcoded so the aggregation helper
+# stays pure (the MetaTrader5 package is absent off Windows).
+DEAL_ENTRY_IN = 0
+DEAL_ENTRY_OUT = 1
+DEAL_ENTRY_INOUT = 2
+DEAL_ENTRY_OUT_BY = 3
+_CLOSING_ENTRIES = (DEAL_ENTRY_OUT, DEAL_ENTRY_INOUT, DEAL_ENTRY_OUT_BY)
+_TRADE_DEAL_TYPES = (0, 1)  # DEAL_TYPE_BUY / DEAL_TYPE_SELL; others are balance/credit/etc.
+_VOLUME_TOL = 1e-9
+
+
+def aggregate_closed_deals(deals, server_utc_offset_seconds: int) -> list[ClosedDeal]:
+    """Fold raw MT5 deal rows into one ClosedDeal per FULLY closed position.
+
+    Groups by `position_id`; ignores balance operations (position_id 0 / non-buy-sell).
+    `profit` is the net of profit + commission + swap + fee over every deal of the
+    position in the window. A position counts as closed once its closing volume
+    covers its opening volume (if the opening deal is outside the window, any closing
+    deal counts). `close_time`/`close_price` come from the last closing deal and the
+    time is normalized from broker-server time to true UTC. Sorted by close time.
+    """
+    groups: dict[int, list] = {}
+    for d in deals:
+        if not d.position_id or d.type not in _TRADE_DEAL_TYPES:
+            continue
+        groups.setdefault(int(d.position_id), []).append(d)
+
+    out: list[ClosedDeal] = []
+    for position_id, rows in groups.items():
+        closing = [d for d in rows if d.entry in _CLOSING_ENTRIES]
+        if not closing:
+            continue
+        in_volume = sum(d.volume for d in rows if d.entry == DEAL_ENTRY_IN)
+        out_volume = sum(d.volume for d in closing)
+        if in_volume > 0 and out_volume < in_volume - _VOLUME_TOL:
+            continue  # partially closed: the remainder is still open
+        last = max(closing, key=lambda d: d.time)
+        out.append(ClosedDeal(
+            position_id=position_id,
+            symbol=last.symbol,
+            profit=float(sum(d.profit + d.commission + d.swap + d.fee for d in rows)),
+            close_time=normalize_server_epoch(last.time, server_utc_offset_seconds),
+            volume=float(out_volume),
+            close_price=float(last.price),
+        ))
+    out.sort(key=lambda c: c.close_time)
+    return out
 
 
 def build_order_request(
@@ -312,6 +361,23 @@ class LiveMT5Client:
                 open_time=normalize_server_epoch(p.time, self.server_utc_offset_seconds),
             )
             for p in positions
+        ]
+
+    def get_closed_deals(self, start: datetime, end: datetime) -> list[ClosedDeal]:
+        """Fully closed positions with a closing deal in [start, end] (UTC), net of
+        commission/swap/fee. The window is shifted into the broker's clock for the
+        request and the returned times are normalized back to UTC."""
+        offset = self.server_utc_offset_seconds
+        shift = timedelta(seconds=offset)
+        deals = mt5.history_deals_get(start + shift, end + shift)
+        if deals is None:
+            code = mt5.last_error()
+            if code and code[0] == 1:  # RES_S_OK: an empty history, not a failure
+                return []
+            raise RuntimeError(f"mt5.history_deals_get returned None (mt5.last_error()={code})")
+        return [
+            c for c in aggregate_closed_deals(deals, offset)
+            if start <= c.close_time <= end
         ]
 
     def _close_request(self, position, volume: float) -> dict:

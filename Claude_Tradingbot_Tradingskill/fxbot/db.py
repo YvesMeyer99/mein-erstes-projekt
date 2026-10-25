@@ -17,6 +17,9 @@ CREATE TABLE IF NOT EXISTS trades (
     pnl REAL,
     pnl_pct REAL,
     entry_balance REAL,
+    ticket INTEGER,
+    closed INTEGER NOT NULL DEFAULT 0,
+    close_price REAL,
     UNIQUE(symbol, entry_time)
 );
 
@@ -34,6 +37,22 @@ CREATE TABLE IF NOT EXISTS weekly_risk (
 """
 
 
+# Columns added after the first release; init_db adds them to a pre-existing trades table.
+# (name, DDL fragment) - ADD COLUMN only accepts constant defaults, which these are.
+_TRADES_MIGRATIONS = (
+    ("ticket", "INTEGER"),
+    ("closed", "INTEGER NOT NULL DEFAULT 0"),
+    ("close_price", "REAL"),
+)
+
+
+def _migrate_trades(conn: sqlite3.Connection) -> None:
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(trades)")}
+    for name, ddl in _TRADES_MIGRATIONS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE trades ADD COLUMN {name} {ddl}")
+
+
 def get_connection(db_path: str) -> sqlite3.Connection:
     if db_path != ":memory:":
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
@@ -45,5 +64,6 @@ def get_connection(db_path: str) -> sqlite3.Connection:
 def init_db(db_path: str) -> sqlite3.Connection:
     conn = get_connection(db_path)
     conn.executescript(SCHEMA)
+    _migrate_trades(conn)
     conn.commit()
     return conn

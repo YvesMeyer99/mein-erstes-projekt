@@ -35,6 +35,23 @@ class OrderResult:
     comment: str
 
 
+@dataclass(frozen=True)
+class ClosedDeal:
+    """A fully closed position, as realized at the broker.
+
+    `position_id` is the broker position identifier (equals the opening order ticket
+    that `send_order` returns). `profit` is the NET realized result in account
+    currency (profit + commission + swap + fee across all deals of the position).
+    `close_time` is tz-aware UTC; `volume` is the closed volume in lots.
+    """
+    position_id: int
+    symbol: str
+    profit: float
+    close_time: datetime
+    volume: float
+    close_price: float = 0.0
+
+
 class MT5Client(Protocol):
     def connect(self) -> bool: ...
     def is_connected(self) -> bool: ...
@@ -56,3 +73,4 @@ class MT5Client(Protocol):
     def close_position(self, ticket: int) -> bool: ...
     def close_partial_position(self, ticket: int, volume: float) -> bool: ...
     def modify_stop_loss(self, ticket: int, new_sl: float) -> bool: ...
+    def get_closed_deals(self, start: datetime, end: datetime) -> list[ClosedDeal]: ...

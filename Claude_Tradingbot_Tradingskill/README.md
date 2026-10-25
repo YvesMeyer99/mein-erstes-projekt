@@ -94,11 +94,16 @@ Result (fill in after running): _not yet performed_
 
 ## Known limitations (as of this build)
 
-1. Closed-trade PnL is NOT yet reconciled back into the daily/weekly loss guards, so those loss
-   limits do NOT fire during live trading yet (a follow-up task). They work in backtests.
+1. Closed-trade PnL IS reconciled into the daily/weekly loss guards at the start of every pass
+   (`fxbot/reconcile.py`: broker deal history via `history_deals_get`, matched to the `trades` row by
+   position ticket, net of commission/swap/fee, dated by the UTC close time). The lock only fires AFTER
+   a stop-out is booked, so one round of stops can still overshoot the cap. If the history call fails,
+   new entries are blocked for that pass. The live deal-history path (`LiveMT5Client.get_closed_deals`)
+   is not unit-tested: verify on the demo account that a stopped-out trade appears in `trades`
+   (`closed=1`, `pnl`, `pnl_pct`) and in `daily_risk`.
 2. All stop rules are usable (`or_mid` / `or_low` / `or_high`, plus `pct` / `atr` with a
-   `stop_param`). Because limitation 1 leaves the daily cap inert in live trading, the config
-   loader refuses setups where one round of stops across the enabled symbols could exceed it.
+   `stop_param`). Because the daily lock only fires after the losses are booked, the config
+   loader still refuses setups where one round of stops across the enabled symbols could exceed it.
 3. `flat_close` closes ALL positions on a traded symbol via the broker - run the bot on a
    DEDICATED account with no manual positions on those symbols.
 4. The duplicate-order latch is in-memory and is lost on a process restart. (A clean

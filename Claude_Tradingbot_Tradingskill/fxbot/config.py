@@ -174,9 +174,9 @@ def _validate_strategy(strategy: StrategyConfig, where: str) -> None:
 def _check_daily_cap(symbols: list["SymbolConfig"]) -> None:
     """Refuse configs whose daily loss cap one full round of trades can exceed.
 
-    Closed-trade PnL is not yet reconciled into the live daily/weekly guards, so
-    the cap would be inert and one round of stops (every enabled symbol losing its
-    risk_per_trade_pct) could blow through it. Compares the summed effective risk
+    The live guards lock only after closed-trade PnL is reconciled, i.e. after the
+    losses are booked, so one round of stops (every enabled symbol losing its
+    risk_per_trade_pct) could blow through the cap before it fires. Compares the summed effective risk
     of the enabled symbols against the strictest effective max_daily_loss_pct.
     """
     enabled = [s for s in symbols if s.enabled]
@@ -188,8 +188,8 @@ def _check_daily_cap(symbols: list["SymbolConfig"]) -> None:
     if total > cap + 1e-9:
         raise ValueError(
             f"max_daily_loss_pct {cap}% can be exceeded in a single round: the enabled symbols risk "
-            f"{total}% in total (sum of risk_per_trade_pct). Live loss-limit reconciliation is not wired "
-            f"yet, so the cap would not stop trading; lower risk_per_trade_pct, disable symbols, or "
+            f"{total}% in total (sum of risk_per_trade_pct). The loss lock only fires after "
+            f"the losses are booked, so one round could overshoot the cap; lower risk_per_trade_pct, disable symbols, or "
             f"raise max_daily_loss_pct"
         )
 
