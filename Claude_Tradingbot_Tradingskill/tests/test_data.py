@@ -44,3 +44,34 @@ def test_bars_from_mt5_uses_resolved_symbol():
     ]
     client = FakeMT5Client({"XAUUSD.m": bars}, balance=10_000, symbol_info=info)
     assert bars_from_mt5(client, "XAUUSD", "M5", START, END) == bars
+
+
+def test_csv_with_utf8_bom_loads(tmp_path):
+    f = tmp_path / "bom.csv"
+    f.write_bytes(
+        b"\xef\xbb\xbftime,open,high,low,close,volume\n"
+        b"2026-01-05T08:00:00+00:00,1.1,1.2,1.0,1.15,10\n"
+    )
+    bars = bars_from_csv(str(f))
+    assert len(bars) == 1 and bars[0].time == datetime(2026, 1, 5, 8, tzinfo=timezone.utc)
+
+
+def test_csv_non_numeric_price_raises_with_line(tmp_path):
+    f = tmp_path / "bad_num.csv"
+    f.write_text(
+        "time,open,high,low,close,volume\n"
+        "2026-01-05T08:00:00+00:00,1.1,1.2,1.0,1.15,10\n"
+        "2026-01-05T08:05:00+00:00,abc,1.2,1.0,1.15,10\n"
+    )
+    with pytest.raises(ValueError, match=r":3:"):
+        bars_from_csv(str(f))
+
+
+def test_csv_short_row_raises_value_error(tmp_path):
+    f = tmp_path / "short.csv"
+    f.write_text(
+        "time,open,high,low,close,volume\n"
+        "2026-01-05T08:00:00+00:00,1.1,1.2\n"
+    )
+    with pytest.raises(ValueError, match=r":2:"):
+        bars_from_csv(str(f))

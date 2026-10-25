@@ -23,23 +23,29 @@ def _parse_time(raw: str) -> datetime:
 def bars_from_csv(path: str) -> list[Bar]:
     """Load bars from a CSV with columns time,open,high,low,close,volume,
     sorted ascending by time."""
-    with open(path, newline="", encoding="utf-8") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
         fields = reader.fieldnames or []
         for col in _REQUIRED_COLUMNS:
             if col not in fields:
                 raise ValueError(f"CSV {path!r} is missing required column {col!r}")
-        bars = [
-            Bar(
-                time=_parse_time(row["time"]),
-                open=float(row["open"]),
-                high=float(row["high"]),
-                low=float(row["low"]),
-                close=float(row["close"]),
-                volume=float(row["volume"]),
-            )
-            for row in reader
-        ]
+        bars = []
+        for row in reader:
+            try:
+                if any(row[col] is None or row[col].strip() == "" for col in _REQUIRED_COLUMNS):
+                    raise ValueError("short row or missing value")
+                bars.append(
+                    Bar(
+                        time=_parse_time(row["time"]),
+                        open=float(row["open"]),
+                        high=float(row["high"]),
+                        low=float(row["low"]),
+                        close=float(row["close"]),
+                        volume=float(row["volume"]),
+                    )
+                )
+            except (ValueError, TypeError) as exc:
+                raise ValueError(f"{path}:{reader.line_num}: {exc}") from exc
     bars.sort(key=lambda b: b.time)
     return bars
 
