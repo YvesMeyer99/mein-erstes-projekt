@@ -260,3 +260,56 @@ def test_backtest_cli_mt5_source_uses_client(monkeypatch, capsys):
         "EURUSD", "M5", datetime(2026, 7, 1, tzinfo=UTC), datetime(2026, 10, 1, tzinfo=UTC)
     )
     assert "pw" not in capsys.readouterr().out
+
+
+def _capture_contract_size(monkeypatch):
+    seen = {}
+    real = backtest_cli.run_backtest
+
+    def spy(bars, sym, starting_balance=10_000.0, contract_size=100_000.0):
+        seen["contract_size"] = contract_size
+        return real(bars, sym, starting_balance=starting_balance, contract_size=contract_size)
+
+    monkeypatch.setattr(backtest_cli, "run_backtest", spy)
+    return seen
+
+
+def test_backtest_cli_uses_symbol_contract_size_from_config(tmp_path, monkeypatch):
+    csv_path = tmp_path / "xau.csv"
+    _write_csv(csv_path)
+    seen = _capture_contract_size(monkeypatch)
+    rc = backtest_cli.main(
+        ["--symbol", "XAUUSD", "--source", "csv", "--file", str(csv_path), "--config", CONFIG_EXAMPLE]
+    )
+    assert rc == 0 and seen["contract_size"] == 100.0  # metals contract size from config.example.json
+
+
+def test_backtest_cli_fx_symbol_defaults_to_standard_lot(tmp_path, monkeypatch):
+    csv_path = tmp_path / "eur.csv"
+    _write_csv(csv_path)
+    seen = _capture_contract_size(monkeypatch)
+    backtest_cli.main(
+        ["--symbol", "EURUSD", "--source", "csv", "--file", str(csv_path), "--config", CONFIG_EXAMPLE]
+    )
+    assert seen["contract_size"] == 100_000.0
+
+
+def test_backtest_cli_contract_size_flag_overrides_config(tmp_path, monkeypatch):
+    csv_path = tmp_path / "xau.csv"
+    _write_csv(csv_path)
+    seen = _capture_contract_size(monkeypatch)
+    backtest_cli.main(
+        ["--symbol", "XAUUSD", "--source", "csv", "--file", str(csv_path), "--config", CONFIG_EXAMPLE,
+         "--contract-size", "50"]
+    )
+    assert seen["contract_size"] == 50.0
+
+
+def test_format_result_handles_undefined_profit_factor():
+    from fxbot.backtester import BacktestResult
+    r = BacktestResult(
+        equity_curve=[10_000.0, 10_100.0], win_rate=1.0, avg_crv=2.0, max_drawdown=0.0,
+        expectancy=100.0, n_trades=1, profit_factor=None, tp_hits=1, sl_hits=0, flat_hits=0,
+    )
+    text = backtest_cli.format_result("EURUSD", 10, r)
+    assert "profit_factor: n/a" in text and "inf" not in text

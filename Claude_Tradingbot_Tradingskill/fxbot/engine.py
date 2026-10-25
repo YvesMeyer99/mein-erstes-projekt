@@ -18,8 +18,11 @@ Design notes / decisions:
     "filtered" - no order. Other exception types propagate.
   * An in-memory per-(symbol, session-day) "attempted" latch is set right before
     send_order, so a failed trades-row write or an exception after the broker
-    accepted the order can never produce a second order the same day. (Lost on
-    process restart; the open-position check is then the remaining guard.)
+    accepted the order can never produce a second order the same day. A clean
+    `success=False` result (nothing was placed, e.g. a requote) releases the latch
+    again so a transient rejection does not forfeit the symbol for the day; an
+    exception or a successful placement keeps it. (Lost on process restart; the
+    open-position check is then the remaining guard.)
   * Sizing and the reward:risk check use the LIVE fill price (ask/bid), not the
     trigger-bar close.
   * Positions that should already be flat (after flat-by, before the open, or
@@ -34,7 +37,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from fxbot.config import SymbolConfig, TradingConfig
-from fxbot.domain import Signal
+from fxbot.domain import Direction, Signal
 from fxbot.mt5_types import MT5Client, OrderResult, Position
 from fxbot.risk import RiskEngine, calculate_lot_size, count_trades_today
 from fxbot.sessions import SLOT_MINUTES, group_by_session_day, session_day, session_slots
@@ -147,7 +150,7 @@ class LiveEngine:
         try:
             signal = plan_exit(
                 trigger, strat.stop_rule, strat.target_r,
-                session_bars=known, stop_param=getattr(strat, "stop_param", None),
+                session_bars=known, stop_param=strat.stop_param,
             )
         except ValueError as exc:
             return TradeOutcome(sym.name, "blocked", [f"cannot plan exit: {exc}"])
@@ -193,7 +196,7 @@ class LiveEngine:
 
         # 7. price sanity: market must still be inside the planned stop/target corridor
         bid, ask = client.get_current_price(resolved)
-        price = ask if signal.direction.value == "buy" else bid
+        price = ask if signal.direction == Direction.BUY else bid
         lo, hi = sorted((signal.sl, signal.tp))
         if not (lo < price < hi):
             return TradeOutcome(
@@ -229,6 +232,8 @@ class LiveEngine:
         self._attempted.add((resolved, today))
         order = client.send_order(resolved, signal.direction, lot, signal.sl, signal.tp)
         if not order.success:
+            # a clean rejection (e.g. requote) placed nothing: free the symbol to retry next poll
+            self._attempted.discard((resolved, today))
             return TradeOutcome(sym.name, "blocked", [f"order rejected: {order.comment}"], order)
         self._record_trade(resolved, now_utc, signal, lot, balance, notes)
         return TradeOutcome(sym.name, "placed", notes, order)

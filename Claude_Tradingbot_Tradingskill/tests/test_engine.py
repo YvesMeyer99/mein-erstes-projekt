@@ -65,11 +65,12 @@ def _history(days: int, n_slots: int = 144, seed: int = 7) -> list[Bar]:
 
 
 def _symbol_cfg(max_spread: float = 30.0, **strategy) -> SymbolConfig:
+    strategy = {"stop_rule": "or_mid", **strategy}
     return SymbolConfig(
         name="EURUSD", enabled=True, risk=RiskConfig(),
         session=SessionConfig(timezone="Europe/London", open="08:00", flat_by="20:00"),
         strategy=StrategyConfig(
-            or_minutes=15, stop_rule="or_mid", target_r=2.0, allow_short=True,
+            or_minutes=15, target_r=2.0, allow_short=True,
             max_spread_points=max_spread, **strategy,
         ),
     )
@@ -275,6 +276,61 @@ def test_rejected_order_is_reported_not_recorded():
     out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
     assert out.action == "blocked" and out.order is not None and not out.order.success
     assert conn.execute("SELECT COUNT(*) c FROM trades").fetchone()["c"] == 0
+
+
+def test_clean_order_rejection_does_not_latch_the_symbol():
+    # a transient requote must not forfeit the symbol for the rest of the day
+    from fxbot.mt5_types import OrderResult
+    engine, client, _, sym = _make(BREAKOUT)
+    real_send = client.send_order
+    client.send_order = lambda *a, **k: OrderResult(False, None, "requote")
+    first = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    assert first.action == "blocked" and any("order rejected" in r for r in first.reasons)
+    assert ("EURUSD", TODAY) not in engine._attempted
+    client.send_order = real_send
+    second = engine.run_symbol_once(sym, NOW_AFTER_BREAK + timedelta(minutes=5))
+    assert second.action == "placed", second.reasons
+    assert len(client.sent_orders) == 1
+
+
+def test_successful_placement_latches_the_symbol():
+    engine, _, _, sym = _make(BREAKOUT)
+    assert engine.run_symbol_once(sym, NOW_AFTER_BREAK).action == "placed"
+    assert ("EURUSD", TODAY) in engine._attempted
+
+
+def test_pct_stop_with_stop_param_places_an_order():
+    # entry 1.1020, 0.1% stop -> sl 1.10089 (rounded away from entry), risk 0.00111, 2R target 1.10422
+    engine, client, _, sym = _make(BREAKOUT, sym=_symbol_cfg(stop_rule="pct", stop_param=0.1))
+    out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    assert out.action == "placed", out.reasons
+    sent = client.sent_orders[-1]
+    assert sent.sl == pytest.approx(1.10089, abs=1e-6) and sent.tp == pytest.approx(1.10422, abs=1e-6)
+
+
+def test_pct_stop_without_stop_param_is_blocked():
+    engine, client, _, sym = _make(BREAKOUT, sym=_symbol_cfg(stop_rule="pct"))
+    out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)
+    assert out.action == "blocked" and any("cannot plan exit" in r for r in out.reasons)
+    assert client.sent_orders == []
+
+
+def test_atr_stop_with_stop_param_places_an_order():
+    # breakout on slot 15 so the ATR(14) has enough closed session bars
+    bars = _today_bars([1.1008] * 12 + [1.1020])
+    now = datetime(2026, 1, 12, 9, 20, tzinfo=UTC)  # slot 15 (09:15) just closed
+    engine, client, _, sym = _make(bars, sym=_symbol_cfg(stop_rule="atr", stop_param=1.0))
+    out = engine.run_symbol_once(sym, now)
+    assert out.action == "placed", out.reasons
+    sent = client.sent_orders[-1]
+    assert 1.1000 < sent.sl < 1.1020 < sent.tp
+
+
+def test_atr_stop_without_enough_bars_is_blocked():
+    engine, client, _, sym = _make(BREAKOUT, sym=_symbol_cfg(stop_rule="atr", stop_param=1.0))
+    out = engine.run_symbol_once(sym, NOW_AFTER_BREAK)  # only 4 session bars < 15
+    assert out.action == "blocked" and any("cannot plan exit" in r for r in out.reasons)
+    assert client.sent_orders == []
 
 
 def test_timemachine_filter_drops_bad_odds():

@@ -1,5 +1,20 @@
+"""MetaTrader 5 adapter.
+
+BROKER SERVER TIME vs UTC: the MetaTrader5 package reports every timestamp
+(bar `time`, tick `time`, position `time`) in the BROKER SERVER's clock encoded
+as if it were UTC (commonly EET = UTC+2 in winter / UTC+3 in summer), NOT in real
+UTC. The rest of the bot works in true tz-aware UTC and slots sessions by
+converting to Europe/London, so this adapter normalizes: `connect()` derives the
+server-to-UTC offset once (fresh tick time vs. the local UTC clock, rounded to
+the hour; or the explicit env override MT5_SERVER_UTC_OFFSET_HOURS) and every
+datetime this module emits (bars, server time, position open times) has the
+offset subtracted. Range requests are shifted the other way. The offset is fixed
+at connect time, so restart the bot after a broker DST switch.
+"""
+import logging
+import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fxbot.domain import Bar, Direction
 from fxbot.mt5_types import SymbolInfo, Position, OrderResult
 
@@ -25,6 +40,41 @@ _SYMBOL_FILLING_IOC = 2
 
 DEFAULT_DEVIATION = 20
 
+log = logging.getLogger(__name__)
+
+OFFSET_ENV_VAR = "MT5_SERVER_UTC_OFFSET_HOURS"
+_MAX_TICK_SKEW_SECONDS = 300          # a fresh tick is within ~seconds of a whole-hour offset
+_MIN_OFFSET_SECONDS = -12 * 3600      # plausible broker server offsets
+_MAX_OFFSET_SECONDS = 14 * 3600
+_TICK_PROBE_SYMBOLS = 50
+
+
+def normalize_server_epoch(epoch: int, server_utc_offset_seconds: int) -> datetime:
+    """Broker-server epoch (server wall clock encoded as UTC) -> true tz-aware UTC.
+
+    Example: with a UTC+2 server (offset 7200) a server-10:00 epoch is 08:00 UTC.
+    """
+    return datetime.fromtimestamp(epoch - server_utc_offset_seconds, tz=timezone.utc)
+
+
+def derive_server_utc_offset_seconds(tick_epoch: int, now_utc: datetime) -> int:
+    """Server-to-UTC offset from a FRESH tick time and the real UTC clock.
+
+    Rounds to the nearest hour. Raises ValueError when the tick is not within a
+    few minutes of a whole-hour offset (stale tick, e.g. market closed) or the
+    offset is implausible; the caller should then use the explicit override.
+    """
+    diff = tick_epoch - now_utc.timestamp()
+    offset = int(round(diff / 3600.0)) * 3600
+    if abs(diff - offset) > _MAX_TICK_SKEW_SECONDS or not (
+        _MIN_OFFSET_SECONDS <= offset <= _MAX_OFFSET_SECONDS
+    ):
+        raise ValueError(
+            f"cannot derive the broker server UTC offset from a tick {diff:.0f}s away from UTC "
+            f"(stale tick / market closed?); set {OFFSET_ENV_VAR} (e.g. 2 or 3) to override"
+        )
+    return offset
+
 
 def resolve_symbol_in(available: list[str], generic: str) -> str:
     """Map a generic symbol name (e.g. "XAUUSD") to the broker's actual name
@@ -40,9 +90,9 @@ def resolve_symbol_in(available: list[str], generic: str) -> str:
     raise ValueError(f"No symbol matching {generic!r} found among: {available}")
 
 
-def _row_to_bar(r) -> Bar:
+def _row_to_bar(r, server_utc_offset_seconds: int) -> Bar:
     return Bar(
-        time=datetime.fromtimestamp(r["time"], tz=timezone.utc),
+        time=normalize_server_epoch(r["time"], server_utc_offset_seconds),
         open=r["open"], high=r["high"], low=r["low"], close=r["close"],
         volume=r["tick_volume"],
     )
@@ -69,7 +119,8 @@ def build_order_request(
 class LiveMT5Client:
     """Thin wrapper around the MetaTrader5 package. Requires the MT5 terminal
     to be installed and running. Not unit-tested (no live terminal in CI) —
-    verify manually against a demo account."""
+    verify manually against a demo account. All emitted datetimes are true UTC
+    (see the module docstring); `connect()` must succeed before any data call."""
 
     def __init__(self, login: int, password: str, server: str):
         if mt5 is None:
@@ -77,11 +128,45 @@ class LiveMT5Client:
         self.login = login
         self.password = password
         self.server = server
+        self._server_utc_offset_seconds: int | None = None
+
+    @property
+    def server_utc_offset_seconds(self) -> int:
+        if self._server_utc_offset_seconds is None:
+            raise RuntimeError("broker server UTC offset unknown: connect() must succeed first")
+        return self._server_utc_offset_seconds
 
     def connect(self) -> bool:
         if not mt5.initialize():
             return False
-        return mt5.login(self.login, password=self.password, server=self.server)
+        if not mt5.login(self.login, password=self.password, server=self.server):
+            return False
+        try:
+            self._server_utc_offset_seconds = self._detect_server_utc_offset()
+        except (ValueError, RuntimeError) as exc:
+            log.error("connected but cannot determine the broker server UTC offset: %s", exc)
+            return False
+        log.info("broker server UTC offset: %+.2f h", self._server_utc_offset_seconds / 3600)
+        return True
+
+    def _detect_server_utc_offset(self) -> int:
+        override = os.environ.get(OFFSET_ENV_VAR, "").strip()
+        if override:
+            try:
+                return int(round(float(override) * 3600))
+            except ValueError:
+                raise ValueError(f"{OFFSET_ENV_VAR}={override!r} is not a number of hours") from None
+        symbols = mt5.symbols_get() or []
+        visible = [s for s in symbols if getattr(s, "visible", False)]
+        newest = 0
+        for s in (visible or list(symbols))[:_TICK_PROBE_SYMBOLS]:
+            mt5.symbol_select(s.name, True)
+            tick = mt5.symbol_info_tick(s.name)
+            if tick is not None:
+                newest = max(newest, tick.time)
+        if not newest:
+            raise RuntimeError(f"no tick available to determine the server UTC offset; set {OFFSET_ENV_VAR}")
+        return derive_server_utc_offset_seconds(newest, datetime.now(timezone.utc))
 
     def is_connected(self) -> bool:
         return mt5.terminal_info() is not None
@@ -140,14 +225,18 @@ class LiveMT5Client:
             rates_batches.insert(0, batch)
             start_pos += request_size
 
-        return [_row_to_bar(r) for batch in rates_batches for r in batch]
+        offset = self.server_utc_offset_seconds
+        return [_row_to_bar(r, offset) for batch in rates_batches for r in batch]
 
     def get_rates_range(self, symbol: str, timeframe: str, start: datetime, end: datetime) -> list[Bar]:
         mt5.symbol_select(symbol, True)
         tf = getattr(mt5, TIMEFRAME_MAP_NAMES[timeframe])
+        offset = self.server_utc_offset_seconds
+        # bar times live in the server clock: shift the (UTC) request window into it
+        shift = timedelta(seconds=offset)
         rates = None
         for attempt in range(5):
-            rates = mt5.copy_rates_range(symbol, tf, start, end)
+            rates = mt5.copy_rates_range(symbol, tf, start + shift, end + shift)
             if rates is not None:
                 break
             time.sleep(1)  # Terminal laedt Historie ggf. erst asynchron vom Broker nach
@@ -156,7 +245,7 @@ class LiveMT5Client:
                 f"mt5.copy_rates_range returned None for {symbol}/{timeframe} after retries "
                 f"(mt5.last_error()={mt5.last_error()})"
             )
-        return [_row_to_bar(r) for r in rates]
+        return [_row_to_bar(r, offset) for r in rates]
 
     def get_spread_points(self, symbol: str) -> float:
         mt5.symbol_select(symbol, True)
@@ -180,7 +269,7 @@ class LiveMT5Client:
         if not symbols:
             raise RuntimeError("No symbols available from MT5 terminal to determine server time")
         tick = mt5.symbol_info_tick(symbols[0].name)
-        return datetime.fromtimestamp(tick.time, tz=timezone.utc)
+        return normalize_server_epoch(tick.time, self.server_utc_offset_seconds)
 
     def _resolve_filling_mode(self, symbol: str) -> str:
         """Not every broker/symbol accepts ORDER_FILLING_IOC — sending an
@@ -220,7 +309,7 @@ class LiveMT5Client:
                 ticket=p.ticket, symbol=p.symbol,
                 direction=Direction.BUY if p.type == 0 else Direction.SELL,
                 volume=p.volume, price_open=p.price_open, sl=p.sl, tp=p.tp,
-                open_time=datetime.fromtimestamp(p.time, tz=timezone.utc),
+                open_time=normalize_server_epoch(p.time, self.server_utc_offset_seconds),
             )
             for p in positions
         ]

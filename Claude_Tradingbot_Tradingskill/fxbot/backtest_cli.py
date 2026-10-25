@@ -20,6 +20,7 @@ def _parse_day(text: str) -> datetime:
 
 
 def format_result(symbol: str, n_bars: int, r: BacktestResult) -> str:
+    pf = "n/a (no losing trades)" if r.profit_factor is None else f"{r.profit_factor:.2f}"
     return "\n".join(
         [
             f"Backtest {symbol} ({n_bars} bars)",
@@ -27,7 +28,7 @@ def format_result(symbol: str, n_bars: int, r: BacktestResult) -> str:
             f"  win_rate:      {r.win_rate:.1%}",
             f"  avg_crv:       {r.avg_crv:.2f}",
             f"  expectancy:    {r.expectancy:.2f} per trade",
-            f"  profit_factor: {r.profit_factor:.2f}",
+            f"  profit_factor: {pf}",
             f"  max_drawdown:  {r.max_drawdown:.1%}",
             f"  tp_hits:       {r.tp_hits}",
             f"  sl_hits:       {r.sl_hits}",
@@ -46,7 +47,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--to", dest="end", help="YYYY-MM-DD (UTC); required for --source mt5")
     p.add_argument("--config", default="config.json")
     p.add_argument("--balance", type=float, default=10_000.0, help="starting balance")
-    p.add_argument("--contract-size", type=float, default=100_000.0, help="e.g. 100 for XAUUSD")
+    p.add_argument(
+        "--contract-size", type=float, default=None,
+        help="overrides the symbol's contract_size from the config (e.g. 100 for XAUUSD)",
+    )
     args = p.parse_args(argv)
 
     def fail(msg: str) -> int:
@@ -75,7 +79,8 @@ def main(argv: list[str] | None = None) -> int:
                 return fail("could not connect/login to the MT5 terminal")
             bars = bars_from_mt5(client, sym.name, cfg.timeframe, _parse_day(args.start), _parse_day(args.end))
 
-        result = run_backtest(bars, sym, starting_balance=args.balance, contract_size=args.contract_size)
+        contract_size = args.contract_size if args.contract_size is not None else sym.contract_size
+        result = run_backtest(bars, sym, starting_balance=args.balance, contract_size=contract_size)
     except (ValueError, OSError, RuntimeError) as exc:
         return fail(str(exc))
 

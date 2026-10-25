@@ -38,6 +38,13 @@ pip install tzdata        # time-zone database (needed on Windows for Europe/Lon
    `timemachine_filter` blocks. Per-symbol `overrides` replace single keys of the top-level
    blocks.
 
+   - `stop_param` (strategy block or per-symbol override): percent of entry for
+     `"stop_rule": "pct"`, ATR(14) multiple for `"atr"`; leave `null` for the `or_*` rules.
+   - `contract_size` (per symbol entry, used by the backtest CLI; default 100000, e.g. 100 for
+     XAUUSD). `--contract-size` overrides it. Live sizing always uses the broker's value.
+   - Config load fails if the enabled symbols' summed `risk_per_trade_pct` exceeds
+     `max_daily_loss_pct` (see limitation 1): lower the per-trade risk, disable symbols or raise the cap.
+
 ## Run live
 
 ```
@@ -53,7 +60,7 @@ Ctrl+C.
 ```
 python -m fxbot.backtest_cli --symbol EURUSD --source csv --file eurusd.csv
 python -m fxbot.backtest_cli --symbol EURUSD --source mt5 --from 2026-07-01 --to 2026-10-01
-python -m fxbot.backtest_cli --symbol XAUUSD --source csv --file xau.csv --contract-size 100 --balance 10000
+python -m fxbot.backtest_cli --symbol XAUUSD --source csv --file xau.csv --balance 10000   # contract_size from config
 ```
 
 CSV columns: `time,open,high,low,close,volume` (epoch seconds or ISO-8601, UTC). The symbol is
@@ -75,8 +82,12 @@ The live terminal paths (`LiveMT5Client`, real `order_send`) are not unit-tested
 1. Set `.env` to an MT5 **DEMO** account (never a live one for this check).
 2. In `config.json` enable exactly one symbol.
 3. Run `python -m fxbot.main`.
-4. Confirm that a breakout places exactly ONE order, with SL and TP set, in the demo terminal.
-5. Confirm that a wide-spread case (spread above `max_spread_points`, e.g. temporarily set it very
+4. Confirm the broker-time normalization: the log shows the derived `broker server UTC offset`
+   (e.g. +2.00 h in winter, +3.00 h in summer) and slot 0 lands on the real 08:00 London candle
+   (compare the first bar of the session in the terminal chart against the bot's session open).
+   If the offset cannot be derived (e.g. market closed), set `MT5_SERVER_UTC_OFFSET_HOURS` in `.env`.
+5. Confirm that a breakout places exactly ONE order, with SL and TP set, in the demo terminal.
+6. Confirm that a wide-spread case (spread above `max_spread_points`, e.g. temporarily set it very
    low) is blocked and no order appears.
 
 Result (fill in after running): _not yet performed_
@@ -85,8 +96,16 @@ Result (fill in after running): _not yet performed_
 
 1. Closed-trade PnL is NOT yet reconciled back into the daily/weekly loss guards, so those loss
    limits do NOT fire during live trading yet (a follow-up task). They work in backtests.
-2. Only the `or_mid` / `or_low` / `or_high` stop rules are usable; `pct` / `atr` need a
-   `stop_param` config field that does not exist yet (a follow-up).
+2. All stop rules are usable (`or_mid` / `or_low` / `or_high`, plus `pct` / `atr` with a
+   `stop_param`). Because limitation 1 leaves the daily cap inert in live trading, the config
+   loader refuses setups where one round of stops across the enabled symbols could exceed it.
 3. `flat_close` closes ALL positions on a traded symbol via the broker - run the bot on a
    DEDICATED account with no manual positions on those symbols.
-4. The duplicate-order latch is in-memory and is lost on a process restart.
+4. The duplicate-order latch is in-memory and is lost on a process restart. (A clean
+   `success=False` order rejection, e.g. a requote, does not latch; an exception or a placed order does.)
+5. The MetaTrader5 package reports bar/tick/position times in the BROKER SERVER's clock (often
+   UTC+2/+3), not UTC. `LiveMT5Client` normalizes everything to true UTC: on `connect()` it derives the
+   server-to-UTC offset once (fresh tick vs. the local UTC clock, rounded to the hour) or reads the
+   `MT5_SERVER_UTC_OFFSET_HOURS` override, and `connect()` fails if neither works. The offset is fixed
+   per run, so restart the bot after the broker's DST change. This path is not unit-tested (only the pure
+   helpers are): verify on the demo account that slot 0 lands at the real 08:00 London.

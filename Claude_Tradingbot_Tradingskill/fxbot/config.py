@@ -1,5 +1,6 @@
 import json
 import os
+import types
 from dataclasses import dataclass, fields, replace
 
 from dotenv import load_dotenv
@@ -57,6 +58,7 @@ class StrategyConfig:
     target_r: float = 2.0
     allow_short: bool = True
     max_spread_points: float = 30
+    stop_param: float | None = None  # percent of entry for stop_rule "pct"; ATR multiple for "atr"
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,7 @@ class SymbolConfig:
     risk: RiskConfig
     session: SessionConfig
     strategy: StrategyConfig
+    contract_size: float = 100000.0  # backtests only (live sizing uses the broker's value)
 
 
 @dataclass(frozen=True)
@@ -95,7 +98,14 @@ def _check_types(obj, where: str) -> None:
     for f in fields(obj):
         value = getattr(obj, f.name)
         expected = f.type
-        if expected is bool:
+        optional = False
+        if isinstance(expected, types.UnionType):  # e.g. float | None
+            args = [a for a in expected.__args__ if a is not type(None)]
+            optional = len(args) != len(expected.__args__)
+            expected = args[0]
+        if optional and value is None:
+            ok = True
+        elif expected is bool:
             ok = isinstance(value, bool)
         elif expected is int:
             ok = isinstance(value, int) and not isinstance(value, bool)
@@ -161,6 +171,29 @@ def _validate_strategy(strategy: StrategyConfig, where: str) -> None:
         )
 
 
+def _check_daily_cap(symbols: list["SymbolConfig"]) -> None:
+    """Refuse configs whose daily loss cap one full round of trades can exceed.
+
+    Closed-trade PnL is not yet reconciled into the live daily/weekly guards, so
+    the cap would be inert and one round of stops (every enabled symbol losing its
+    risk_per_trade_pct) could blow through it. Compares the summed effective risk
+    of the enabled symbols against the strictest effective max_daily_loss_pct.
+    """
+    enabled = [s for s in symbols if s.enabled]
+    caps = [s.risk.max_daily_loss_pct for s in enabled if s.risk.max_daily_loss_pct > 0]
+    if not caps:
+        return
+    cap = min(caps)
+    total = sum(s.risk.risk_per_trade_pct for s in enabled)
+    if total > cap + 1e-9:
+        raise ValueError(
+            f"max_daily_loss_pct {cap}% can be exceeded in a single round: the enabled symbols risk "
+            f"{total}% in total (sum of risk_per_trade_pct). Live loss-limit reconciliation is not wired "
+            f"yet, so the cap would not stop trading; lower risk_per_trade_pct, disable symbols, or "
+            f"raise max_daily_loss_pct"
+        )
+
+
 def load_config(path: str) -> TradingConfig:
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
@@ -194,6 +227,12 @@ def load_config(path: str) -> TradingConfig:
         enabled = entry.get("enabled", True)
         if not isinstance(enabled, bool):
             raise ValueError(f"symbols[{name}].enabled must be a boolean, got {type(enabled).__name__} ({enabled!r})")
+        contract_size = entry.get("contract_size", SymbolConfig.contract_size)
+        if (
+            isinstance(contract_size, bool) or not isinstance(contract_size, (int, float))
+            or not contract_size > 0
+        ):
+            raise ValueError(f"symbols[{name}].contract_size must be a positive number, got {contract_size!r}")
         symbols.append(
             SymbolConfig(
                 name=name,
@@ -201,7 +240,9 @@ def load_config(path: str) -> TradingConfig:
                 risk=merged["risk"],
                 session=merged["session"],
                 strategy=merged["strategy"],
+                contract_size=float(contract_size),
             )
         )
 
+    _check_daily_cap(symbols)
     return TradingConfig(timeframe=timeframe, timemachine=timemachine, symbols=symbols)

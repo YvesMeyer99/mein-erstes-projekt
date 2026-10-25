@@ -16,19 +16,21 @@ class BacktestResult:
     max_drawdown: float
     expectancy: float
     n_trades: int
-    profit_factor: float
+    profit_factor: float | None  # gross win / gross loss; None = no losing trades (undefined), 0.0 = no trades
     tp_hits: int
     sl_hits: int
     flat_hits: int
 
 
-def _profit_factor(pnls: list) -> float:
+def _profit_factor(pnls: list) -> float | None:
+    """Gross win / gross loss. None (JSON null, instead of an unserializable inf)
+    when there are winners but no losing trade; 0.0 when there is nothing to measure."""
     if not pnls:
         return 0.0
     gross_win = sum(pnl for pnl in pnls if pnl > 0)
     gross_loss = abs(sum(pnl for pnl in pnls if pnl < 0))
     if gross_loss == 0:
-        return float("inf") if gross_win > 0 else 0.0
+        return None if gross_win > 0 else 0.0
     return gross_win / gross_loss
 
 
@@ -91,7 +93,7 @@ def run_backtest(
             strat.stop_rule,
             strat.target_r,
             session_bars=known,
-            stop_param=getattr(strat, "stop_param", None),
+            stop_param=strat.stop_param,
         )
         lot = calculate_lot_size(
             balance=balance,

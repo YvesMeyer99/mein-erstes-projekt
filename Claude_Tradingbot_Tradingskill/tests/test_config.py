@@ -259,3 +259,106 @@ def test_non_dict_overrides_rejected(tmp_path, bad):
     path = _cfg_with(tmp_path, lambda d: d["symbols"][0].__setitem__("overrides", bad))
     with pytest.raises(ValueError):
         load_config(path)
+
+
+# ------------------------------------------------------------------ stop_param (I2)
+
+def test_stop_param_defaults_to_none(tmp_path):
+    cfg = load_config(_write(tmp_path, EXAMPLE_JSON))
+    assert cfg.symbols[0].strategy.stop_param is None
+
+
+def test_pct_stop_rule_with_stop_param_loads(tmp_path):
+    path = _cfg_with(
+        tmp_path,
+        lambda d: d["strategy"].update({"stop_rule": "pct", "stop_param": 0.25}),
+    )
+    eur = load_config(path).symbols[0]
+    assert eur.strategy.stop_rule == "pct"
+    assert eur.strategy.stop_param == 0.25
+
+
+def test_stop_param_per_symbol_override_flat_and_grouped(tmp_path):
+    path = _cfg_with(
+        tmp_path,
+        lambda d: (
+            d["symbols"][0].__setitem__("overrides", {"stop_rule": "atr", "stop_param": 1.5}),
+            d["symbols"][1].__setitem__("overrides", {"strategy": {"stop_rule": "pct", "stop_param": 0.3}}),
+        ),
+    )
+    cfg = load_config(path)
+    assert (cfg.symbols[0].strategy.stop_rule, cfg.symbols[0].strategy.stop_param) == ("atr", 1.5)
+    assert (cfg.symbols[1].strategy.stop_rule, cfg.symbols[1].strategy.stop_param) == ("pct", 0.3)
+    assert cfg.symbols[2].strategy.stop_param is None  # other symbols unaffected
+
+
+@pytest.mark.parametrize("bad", ["0.5", True, [1]])
+def test_stop_param_wrong_type_rejected(tmp_path, bad):
+    path = _cfg_with(tmp_path, lambda d: d["strategy"].__setitem__("stop_param", bad))
+    with pytest.raises(ValueError, match="stop_param"):
+        load_config(path)
+
+
+# ------------------------------------------------------------------ daily-cap guard (I1)
+
+def test_daily_cap_exceeded_by_one_round_of_enabled_symbols_raises(tmp_path):
+    # 4 enabled symbols x 1% = 4% > max_daily_loss_pct 3%
+    path = _cfg_with(tmp_path, lambda d: d["symbols"][3].__setitem__("enabled", True))
+    with pytest.raises(ValueError, match="max_daily_loss_pct"):
+        load_config(path)
+
+
+def test_daily_cap_covering_one_round_loads(tmp_path):
+    def mutate(d):
+        d["symbols"][3]["enabled"] = True
+        d["risk"]["max_daily_loss_pct"] = 5.0
+
+    assert len(load_config(_cfg_with(tmp_path, mutate)).symbols) == 4
+
+
+def test_daily_cap_guard_ignores_disabled_symbols_and_uses_effective_risk(tmp_path):
+    def mutate(d):
+        d["symbols"][3]["enabled"] = True      # 4 enabled ...
+        d["symbols"][2]["enabled"] = False     # ... minus one = 3 x 1% = 3% <= 3%
+        d["symbols"][0]["overrides"] = {"risk_per_trade_pct": 0.5}
+
+    assert len(load_config(_cfg_with(tmp_path, mutate)).symbols) == 4
+
+
+def test_daily_cap_guard_uses_per_symbol_effective_cap(tmp_path):
+    def mutate(d):
+        d["symbols"][0]["overrides"] = {"max_daily_loss_pct": 2.0}  # strictest cap: 2% < 3 x 1%
+
+    with pytest.raises(ValueError, match="max_daily_loss_pct"):
+        load_config(_cfg_with(tmp_path, mutate))
+
+
+def test_daily_cap_guard_skipped_when_cap_is_zero(tmp_path):
+    def mutate(d):
+        d["symbols"][3]["enabled"] = True
+        d["risk"]["max_daily_loss_pct"] = 0
+
+    assert len(load_config(_cfg_with(tmp_path, mutate)).symbols) == 4
+
+
+# ------------------------------------------------------------------ contract_size
+
+def test_contract_size_defaults_and_per_symbol(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["symbols"][2].__setitem__("contract_size", 100))
+    cfg = load_config(path)
+    assert cfg.symbols[0].contract_size == 100_000.0
+    assert cfg.symbols[2].contract_size == 100.0
+
+
+@pytest.mark.parametrize("bad", ["100", True, 0, -5, None])
+def test_contract_size_invalid_rejected(tmp_path, bad):
+    path = _cfg_with(tmp_path, lambda d: d["symbols"][2].__setitem__("contract_size", bad))
+    with pytest.raises(ValueError, match="contract_size"):
+        load_config(path)
+
+
+def test_example_config_has_metal_contract_sizes():
+    cfg = load_config("config.example.json")
+    by = {s.name: s for s in cfg.symbols}
+    assert by["XAUUSD"].contract_size == 100.0
+    assert by["EURUSD"].contract_size == 100_000.0

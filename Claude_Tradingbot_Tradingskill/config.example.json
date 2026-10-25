@@ -14,13 +14,14 @@
     "stop_rule": "or_mid",
     "target_r": 2.0,
     "allow_short": true,
-    "max_spread_points": 30
+    "max_spread_points": 30,
+    "stop_param": null
   },
   "timemachine_filter": { "enabled": false, "min_p_green": 0.5, "replays": 10000, "seed": 19 },
   "symbols": [
     { "name": "EURUSD", "enabled": true },
     { "name": "GBPUSD", "enabled": true },
-    { "name": "XAUUSD", "enabled": true, "overrides": { "or_minutes": 30, "max_spread_points": 50 } },
-    { "name": "XAGUSD", "enabled": false }
+    { "name": "XAUUSD", "enabled": true, "contract_size": 100, "overrides": { "or_minutes": 30, "max_spread_points": 50 } },
+    { "name": "XAGUSD", "enabled": false, "contract_size": 5000 }
   ]
 }

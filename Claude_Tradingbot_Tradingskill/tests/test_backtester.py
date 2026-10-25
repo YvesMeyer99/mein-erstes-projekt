@@ -1,4 +1,8 @@
+import json
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
+
+import pytest
 
 from fxbot.backtester import BacktestResult, run_backtest
 from fxbot.config import RiskConfig, SessionConfig, StrategyConfig, SymbolConfig
@@ -119,3 +123,40 @@ def test_multiple_days_accumulate_and_metrics():
     assert r.win_rate == 0.5
     assert r.profit_factor > 1.0  # 2R win vs 1R loss
     assert 0.0 < r.max_drawdown < 0.05
+
+
+def test_profit_factor_is_none_without_losing_trades_and_json_serializable():
+    r = run_backtest(ONE_DAY_UP_TO_TARGET, CFG_EURUSD)
+    assert r.n_trades == 1 and r.sl_hits == 0
+    assert r.profit_factor is None  # no gross loss: undefined, not float("inf")
+    assert json.loads(json.dumps(asdict(r)))["profit_factor"] is None
+
+
+def test_profit_factor_is_zero_without_trades():
+    assert run_backtest(ONE_QUIET_DAY, CFG_EURUSD).profit_factor == 0.0
+
+
+def test_pct_stop_with_stop_param_produces_a_trade():
+    # entry 1.1020, 0.2% stop -> sl 1.09980 (below the OR low), risk 0.0022, 2R target 1.1064
+    cfg = replace(CFG_EURUSD, strategy=replace(CFG_EURUSD.strategy, stop_rule="pct", stop_param=0.2))
+    bars = _opening_range() + [
+        _TRIGGER,
+        _bar(4, 1.1020, 1.1070, 1.1015, 1.1065),  # reaches the 1.1064 target, never the stop
+    ]
+    r = run_backtest(bars, cfg)
+    assert r.n_trades == 1 and r.tp_hits == 1 and r.sl_hits == 0
+
+
+def test_atr_stop_with_stop_param_produces_a_trade():
+    cfg = replace(CFG_EURUSD, strategy=replace(CFG_EURUSD.strategy, stop_rule="atr", stop_param=1.0))
+    quiet = [_bar(s, 1.1005, 1.1009, 1.0995, 1.1005) for s in range(3, 15)]  # slots 3..14 inside the range
+    trigger = _bar(15, 1.1005, 1.1022, 1.1004, 1.1020)
+    after = _bar(16, 1.1020, 1.1060, 1.1015, 1.1055)
+    r = run_backtest(_opening_range() + quiet + [trigger, after], cfg)
+    assert r.n_trades == 1 and r.tp_hits == 1
+
+
+def test_pct_stop_without_stop_param_still_raises():
+    cfg = replace(CFG_EURUSD, strategy=replace(CFG_EURUSD.strategy, stop_rule="pct"))
+    with pytest.raises(ValueError, match="stop_param"):
+        run_backtest(ONE_DAY_UP_TO_TARGET, cfg)
