@@ -1,11 +1,32 @@
 import math
 import sqlite3
 from dataclasses import dataclass, field
+from collections.abc import Iterable
 from datetime import datetime
 
 from fxbot.config import RiskConfig
 from fxbot.domain import Signal
 from fxbot.mt5_types import Position
+
+
+def effective_loss_caps(risks: Iterable[RiskConfig]) -> tuple[float, float]:
+    """(daily, weekly) loss cap in percent the live guards enforce for these risk configs.
+
+    The smallest POSITIVE cap wins (a cap of 0 means "off" for the config check, so it is
+    ignored); if none is positive the RiskConfig() defaults apply. Shared by the live engine
+    and the backtester so both resolve caps identically.
+    """
+    risks = list(risks)
+    default = RiskConfig()
+
+    def strictest(values: list[float], fallback: float) -> float:
+        positive = [v for v in values if v > 0]
+        return min(positive) if positive else fallback
+
+    return (
+        strictest([r.max_daily_loss_pct for r in risks], default.max_daily_loss_pct),
+        strictest([r.max_weekly_loss_pct for r in risks], default.max_weekly_loss_pct),
+    )
 
 
 def calculate_lot_size(

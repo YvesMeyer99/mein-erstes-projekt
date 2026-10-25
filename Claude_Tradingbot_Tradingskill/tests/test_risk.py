@@ -163,3 +163,17 @@ def test_count_trades_today(conn):
     conn.execute(INSERT_TRADE, ("XAUUSD", "2026-01-05T10:15:00", "buy", 1.1, 1.09, 1.12, 0.1, 2.0))
     conn.execute(INSERT_TRADE, ("EURUSD", "2026-01-06T08:15:00", "buy", 1.1, 1.09, 1.12, 0.1, 2.0))
     assert count_trades_today(conn, "EURUSD", "2026-01-05") == 2
+
+
+def test_effective_loss_caps_ignores_zero_and_falls_back_to_defaults():
+    from fxbot.config import RiskConfig
+    from fxbot.risk import effective_loss_caps
+
+    d = RiskConfig()
+    assert effective_loss_caps([RiskConfig(max_daily_loss_pct=0, max_weekly_loss_pct=0)]) == (
+        d.max_daily_loss_pct, d.max_weekly_loss_pct)
+    assert effective_loss_caps([
+        RiskConfig(max_daily_loss_pct=2.0, max_weekly_loss_pct=0),
+        RiskConfig(max_daily_loss_pct=1.0, max_weekly_loss_pct=4.0),
+    ]) == (1.0, 4.0)
+    assert effective_loss_caps([]) == (d.max_daily_loss_pct, d.max_weekly_loss_pct)

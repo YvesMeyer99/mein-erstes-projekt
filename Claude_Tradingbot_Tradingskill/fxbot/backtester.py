@@ -1,12 +1,19 @@
 """ORB backtester: one opening-range-breakout trade per session day over 5-minute bars.
 
-By default (`apply_risk_gates=True`) the backtest applies the same config loss limits the
-live engine enforces, so results are not flattering: the `min_reward_risk` filter,
-`max_trades_per_day`, and a latched daily + weekly loss stop (`max_daily_loss_pct` /
-`max_weekly_loss_pct`, 0 = off). PnL is bucketed with `reconcile.guard_keys` (UTC day,
-Monday-start week) exactly like live, and a locked day/week stays locked even if a later
-win lifts the running total. Triggers refused by a gate are counted in
-`BacktestResult.skipped_by_risk` and not traded.
+By default (`apply_risk_gates=True`) the backtest applies the config risk gates, so results
+are less flattering than the raw strategy: the `min_reward_risk` filter (fail-closed, as in
+risk.py), `max_trades_per_day`, and a latched daily + weekly loss stop. The loss caps are
+resolved the way the live engine resolves them (`risk.effective_loss_caps`): a configured
+cap > 0 is used, a cap of 0 falls back to the RiskConfig() defaults (3% daily / 6% weekly),
+it does NOT switch the stop off. A locked day/week stays locked even if a later win lifts the
+running total. Day/week buckets use `reconcile.guard_keys` on the ENTRY (trigger) time; for
+the London 08:00-20:00 session that is the same UTC day as the live close-time bucket (a
+session crossing UTC midnight could bucket differently). Triggers refused by a gate are
+counted in `BacktestResult.skipped_by_risk` and not traded.
+
+Because at most one trade is taken per session day, the daily-loss stop and
+`max_trades_per_day` rarely bind at run level; in practice the WEEKLY loss stop and the
+`min_reward_risk` filter shape the results.
 
 NOT modelled: the spread filter (`max_spread_points`; OHLCV bars carry no spread) and
 `max_open_positions` (one trade per symbol per day, so positions never overlap).
@@ -18,7 +25,7 @@ from dataclasses import dataclass
 from fxbot.config import RiskConfig, SymbolConfig
 from fxbot.domain import Bar, Direction, Signal
 from fxbot.reconcile import guard_keys
-from fxbot.risk import calculate_lot_size
+from fxbot.risk import calculate_lot_size, effective_loss_caps
 from fxbot.sessions import group_by_session_day, session_slots
 from fxbot.strategy import detect_orb_trigger, plan_exit
 
@@ -41,13 +48,15 @@ class BacktestResult:
 class RiskLatch:
     """In-memory twin of the live DailyRiskGuard/WeeklyRiskGuard (no SQLite).
 
-    A day/week locks once its booked PnL % reaches `<= -max_*_loss_pct` and then STAYS
-    locked even if later PnL recovers. A cap of 0 switches that guard off (as in config.py).
-    Also counts trades per day for `max_trades_per_day`.
+    A day/week locks once its booked PnL % reaches `<= -cap` and then STAYS locked even if
+    later PnL recovers. Caps are the live ones (`effective_loss_caps`): a configured 0 falls
+    back to the RiskConfig() defaults rather than meaning off. Also counts trades per day for
+    `max_trades_per_day`.
     """
 
     def __init__(self, risk: RiskConfig):
         self.risk = risk
+        self.daily_cap, self.weekly_cap = effective_loss_caps([risk])
         self.daily_pnl_pct: dict[str, float] = defaultdict(float)
         self.weekly_pnl_pct: dict[str, float] = defaultdict(float)
         self.locked_days: set[str] = set()
@@ -65,11 +74,9 @@ class RiskLatch:
         self.trades_per_day[day_key] += 1
         self.daily_pnl_pct[day_key] += pnl_pct
         self.weekly_pnl_pct[week_key] += pnl_pct
-        daily_cap = abs(self.risk.max_daily_loss_pct)
-        weekly_cap = abs(self.risk.max_weekly_loss_pct)
-        if daily_cap > 0 and self.daily_pnl_pct[day_key] <= -daily_cap:
+        if self.daily_pnl_pct[day_key] <= -self.daily_cap:
             self.locked_days.add(day_key)
-        if weekly_cap > 0 and self.weekly_pnl_pct[week_key] <= -weekly_cap:
+        if self.weekly_pnl_pct[week_key] <= -self.weekly_cap:
             self.locked_weeks.add(week_key)
 
 
@@ -151,7 +158,7 @@ def run_backtest(
         )
         day_key, week_key = guard_keys(trigger.trigger_time)
         if apply_risk_gates and (
-            signal.crv < cfg.risk.min_reward_risk or latch.is_blocked(day_key, week_key)
+            not (signal.crv >= cfg.risk.min_reward_risk) or latch.is_blocked(day_key, week_key)
         ):
             skipped_by_risk += 1
             continue

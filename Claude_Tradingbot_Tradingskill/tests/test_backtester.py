@@ -242,10 +242,26 @@ def test_days_without_trigger_are_not_counted_as_skipped():
     assert r.n_trades == 0 and r.skipped_by_risk == 1
 
 
-def test_daily_cap_off_when_zero_and_weekly_cap_off_when_zero():
+def test_zero_loss_caps_fall_back_to_live_defaults_not_off():
+    # Live (effective_loss_caps) treats a 0 cap as "use RiskConfig() defaults" (3% / 6%),
+    # not as off. 2.5% risk per loss: week total passes -6% on the 3rd loss -> Thu/Fri skipped.
     bars = [b for d in _days(5) for b in _losing_day(d)]
-    r = run_backtest(bars, _gated_cfg(max_daily_loss_pct=0, max_weekly_loss_pct=0))
-    assert r.n_trades == 5 and r.skipped_by_risk == 0
+    zero = run_backtest(bars, _gated_cfg(risk_per_trade_pct=2.5, max_daily_loss_pct=0, max_weekly_loss_pct=0))
+    explicit = run_backtest(bars, _gated_cfg(risk_per_trade_pct=2.5, max_daily_loss_pct=3.0, max_weekly_loss_pct=6.0))
+    assert zero.n_trades == 3 and zero.skipped_by_risk == 2
+    assert zero.equity_curve == explicit.equity_curve
+
+
+def test_max_trades_per_day_zero_skips_every_trigger_like_live():
+    bars = [b for d in _days(2) for b in _winning_day(d)]
+    r = run_backtest(bars, _gated_cfg(max_trades_per_day=0))
+    assert r.n_trades == 0 and r.skipped_by_risk == 2
+
+
+def test_min_reward_risk_is_fail_closed_on_nan():
+    bars = _winning_day(OPEN)
+    r = run_backtest(bars, _gated_cfg(min_reward_risk=float("nan")))
+    assert r.n_trades == 0 and r.skipped_by_risk == 1
 
 
 def test_default_config_does_not_trip_on_small_legacy_fixtures():
@@ -270,7 +286,7 @@ def test_risk_latch_daily_cap_stays_locked_after_win():
 def test_risk_latch_max_trades_per_day():
     from fxbot.backtester import RiskLatch
 
-    latch = RiskLatch(_gated_cfg(max_trades_per_day=2, max_daily_loss_pct=0, max_weekly_loss_pct=0).risk)
+    latch = RiskLatch(_gated_cfg(max_trades_per_day=2).risk)
     day, week = "2026-01-05", "2026-01-05"
     latch.record(day, week, 0.5)
     assert not latch.is_blocked(day, week)

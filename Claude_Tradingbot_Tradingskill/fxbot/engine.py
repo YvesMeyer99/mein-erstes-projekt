@@ -47,12 +47,13 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from fxbot.config import RiskConfig, SymbolConfig, TradingConfig
+from fxbot.config import SymbolConfig, TradingConfig
 from fxbot.domain import Direction, Signal
 from fxbot.mt5_types import MT5Client, OrderResult, Position
 from fxbot.reconcile import reconcile_closed_trades
 from fxbot.risk import (
     DailyRiskGuard, RiskEngine, WeeklyRiskGuard, calculate_lot_size, count_trades_today,
+    effective_loss_caps,
 )
 from fxbot.sessions import SLOT_MINUTES, group_by_session_day, session_day, session_slots
 from fxbot.strategy import detect_orb_trigger, plan_exit
@@ -106,17 +107,7 @@ class LiveEngine:
     def _strictest_loss_caps(cfg: TradingConfig) -> tuple[float, float]:
         """Smallest positive daily/weekly loss cap among enabled symbols (a cap of 0 means
         "off" for the config check, so it is ignored); RiskConfig defaults if none is set."""
-        enabled = [s.risk for s in cfg.symbols if s.enabled]
-        default = RiskConfig()
-
-        def strictest(values: list[float], fallback: float) -> float:
-            positive = [v for v in values if v > 0]
-            return min(positive) if positive else fallback
-
-        return (
-            strictest([r.max_daily_loss_pct for r in enabled], default.max_daily_loss_pct),
-            strictest([r.max_weekly_loss_pct for r in enabled], default.max_weekly_loss_pct),
-        )
+        return effective_loss_caps(s.risk for s in cfg.symbols if s.enabled)
 
     # ------------------------------------------------------------------ public
 

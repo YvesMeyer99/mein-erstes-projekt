@@ -76,12 +76,16 @@ looked up in `config.json` (override with `--config`). The result prints trade c
 average CRV, expectancy, profit factor, max drawdown, TP/SL/flat exit counts and
 `skipped_by_risk` (ORB triggers refused by a risk gate).
 
-By default the backtest applies the config's risk gates so it reflects the live loss limits:
-`min_reward_risk`, `max_trades_per_day` and a latched daily + weekly loss stop
-(`max_daily_loss_pct` / `max_weekly_loss_pct`; once a day or week hits its cap it stays locked,
-0 = off). Pass `--no-risk-gates` for the raw strategy. It does **not** model the spread filter
-(`max_spread_points`; OHLCV bars carry no spread) nor `max_open_positions` (one trade per symbol
-per day, so positions never overlap).
+By default the backtest applies the config's risk gates: the `min_reward_risk` filter,
+`max_trades_per_day` and a latched daily + weekly loss stop (once a day or week hits its cap it
+stays locked). Loss caps are resolved as the live engine does: a configured cap > 0 is used and
+a cap of 0 falls back to the defaults (3% daily / 6% weekly), it does not disable the stop.
+Day/week buckets are keyed by the entry time (same UTC day as the live close-time bucket for the
+London 08:00-20:00 session; a session crossing UTC midnight could differ). Because the backtester
+takes at most one trade per session day, the daily stop and `max_trades_per_day` rarely bind; in
+practice the weekly stop and `min_reward_risk` shape the results. Pass `--no-risk-gates` for the
+raw strategy. It does **not** model the spread filter (`max_spread_points`; OHLCV bars carry no
+spread) nor `max_open_positions` (one trade per symbol per day, so positions never overlap).
 
 ## Tests
 
