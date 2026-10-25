@@ -1,8 +1,10 @@
-"""ORB (opening range breakout) strategy: entry detection."""
+"""ORB (opening range breakout) strategy: entry detection and exit planning."""
+import math
 from dataclasses import dataclass
 from datetime import datetime
 
-from fxbot.domain import Bar, Direction
+from fxbot.domain import Bar, Direction, Signal
+from fxbot.indicators import atr14
 from fxbot.sessions import SLOT_MINUTES, opening_range
 
 
@@ -55,3 +57,66 @@ def detect_orb_trigger(
             or_low=or_low,
         )
     return None
+
+
+_PRICE_DECIMALS = 5
+_SCALE = 10**_PRICE_DECIMALS
+
+
+def _round_away(price: float, direction: Direction) -> float:
+    """Round a stop to 5 decimals away from entry: down for BUY, up for SELL."""
+    scaled = round(price * _SCALE, 6)  # absorb float noise before floor/ceil
+    fn = math.floor if direction == Direction.BUY else math.ceil
+    return fn(scaled) / _SCALE
+
+
+def plan_exit(
+    trigger: OrbTrigger,
+    stop_rule: str,
+    target_r: float,
+    session_bars: list[Bar] | None = None,
+    stop_param: float | None = None,
+) -> Signal:
+    """Build a Signal from a trigger: stop by `stop_rule`, target at `target_r` x risk.
+
+    Rules: or_mid / or_low / or_high (opening-range levels), pct (`stop_param`
+    percent of entry), atr (`stop_param` x ATR14 of `session_bars`). The stop is
+    rounded away from entry. Raises ValueError for missing data, an unknown
+    rule, or non-positive risk.
+    """
+    entry = trigger.entry
+    is_buy = trigger.direction == Direction.BUY
+    sign = -1.0 if is_buy else 1.0  # stop offset side relative to entry
+
+    if stop_rule == "or_mid":
+        stop = (trigger.or_high + trigger.or_low) / 2
+    elif stop_rule == "or_low":
+        stop = trigger.or_low
+    elif stop_rule == "or_high":
+        stop = trigger.or_high
+    elif stop_rule == "pct":
+        if stop_param is None:
+            raise ValueError("stop rule 'pct' requires stop_param")
+        stop = entry + sign * entry * stop_param / 100.0
+    elif stop_rule == "atr":
+        if stop_param is None:
+            raise ValueError("stop rule 'atr' requires stop_param")
+        if not session_bars:
+            raise ValueError("stop rule 'atr' requires session_bars")
+        stop = entry + sign * stop_param * atr14(session_bars)
+    else:
+        raise ValueError(f"unknown stop rule: {stop_rule!r}")
+
+    stop = _round_away(stop, trigger.direction)
+    risk = (entry - stop) if is_buy else (stop - entry)
+    if risk <= 0:
+        raise ValueError(f"non-positive risk {risk} (entry={entry}, stop={stop})")
+
+    target = entry - sign * target_r * risk
+    return Signal(
+        direction=trigger.direction,
+        confidence=1.0,
+        entry=entry,
+        sl=stop,
+        tp=target,
+    )
