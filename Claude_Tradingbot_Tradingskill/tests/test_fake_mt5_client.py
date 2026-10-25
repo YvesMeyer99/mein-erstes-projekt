@@ -70,3 +70,33 @@ def test_rates_and_spread_and_balance():
     assert c.get_account_balance() == 10_000
     assert c.get_symbol_info("EURUSD") == INFO
     assert c.connect() and c.is_connected()
+
+
+def test_partial_close_float_dust_does_not_leave_phantom_position():
+    c = _client()
+    r = c.send_order("EURUSD", Direction.BUY, 0.4, sl=1.09, tp=1.12)
+    assert c.close_partial_position(r.ticket, 0.1) is True
+    assert c.close_partial_position(r.ticket, 0.3) is True
+    assert c.get_open_positions("EURUSD") == []
+
+
+def test_partial_close_after_float_subtraction_accepts_exact_remainder():
+    c = _client()
+    r = c.send_order("EURUSD", Direction.BUY, 0.3, sl=1.09, tp=1.12)
+    assert c.close_partial_position(r.ticket, 0.1) is True  # 0.19999999999999998 left
+    assert c.close_partial_position(r.ticket, 0.2) is True
+    assert c.get_open_positions("EURUSD") == []
+
+
+def test_partial_close_more_than_open_is_rejected():
+    c = _client()
+    r = c.send_order("EURUSD", Direction.BUY, 0.1, sl=1.09, tp=1.12)
+    assert c.close_partial_position(r.ticket, 0.2) is False
+    assert len(c.get_open_positions("EURUSD")) == 1
+
+
+def test_resolve_symbol_matches_broker_suffix():
+    info = SymbolInfo("XAUUSD.m", 0.01, 0.01, 100.0, 100.0, 0.01, 2)
+    c = FakeMT5Client({"XAUUSD.m": _bars()}, balance=10_000, symbol_info=info)
+    assert c.resolve_symbol("XAUUSD") == "XAUUSD.m"
+    assert c.resolve_symbol("xauusd.m") == "XAUUSD.m"

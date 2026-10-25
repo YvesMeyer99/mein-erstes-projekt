@@ -1,7 +1,9 @@
+import math
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 
 from fxbot.domain import Bar, Direction
+from fxbot.mt5_client import resolve_symbol_in
 from fxbot.mt5_types import OrderResult, Position, SymbolInfo
 
 
@@ -65,11 +67,7 @@ class FakeMT5Client:
         return self.spread_points
 
     def resolve_symbol(self, generic: str) -> str:
-        if generic in self.bars_by_symbol or generic == self.symbol_info.name:
-            return generic
-        raise ValueError(
-            f"No symbol matching {generic!r} found among: {self.get_available_symbols()}"
-        )
+        return resolve_symbol_in(self.get_available_symbols(), generic)
 
     def get_current_price(self, symbol: str) -> tuple[float, float]:
         bars = self.bars_by_symbol[symbol]
@@ -102,12 +100,17 @@ class FakeMT5Client:
 
     def close_partial_position(self, ticket: int, volume: float) -> bool:
         pos = self._positions.get(ticket)
-        if pos is None or volume > pos.volume:
+        if pos is None:
             return False
-        if volume == pos.volume:
-            del self._positions[ticket]
+        step = self.symbol_info.volume_step
+        tol = step / 2  # float-safe: volumes are multiples of volume_step
+        if volume > pos.volume + tol:
+            return False
+        remaining = pos.volume - volume
+        if remaining < step - tol or math.isclose(volume, pos.volume):
+            del self._positions[ticket]  # remainder below one step = full close
         else:
-            self._positions[ticket] = replace(pos, volume=pos.volume - volume)
+            self._positions[ticket] = replace(pos, volume=remaining)
         return True
 
     def modify_stop_loss(self, ticket: int, new_sl: float) -> bool:

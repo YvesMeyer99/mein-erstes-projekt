@@ -23,6 +23,8 @@ TIMEFRAME_MAP_NAMES = {
 _SYMBOL_FILLING_FOK = 1
 _SYMBOL_FILLING_IOC = 2
 
+DEFAULT_DEVIATION = 20
+
 
 def resolve_symbol_in(available: list[str], generic: str) -> str:
     """Map a generic symbol name (e.g. "XAUUSD") to the broker's actual name
@@ -48,7 +50,7 @@ def _row_to_bar(r) -> Bar:
 
 def build_order_request(
     symbol: str, direction: Direction, lot: float, sl: float, tp: float, price: float,
-    deviation: int = 20, filling_mode: str = "ORDER_FILLING_IOC",
+    deviation: int = DEFAULT_DEVIATION, filling_mode: str = "ORDER_FILLING_IOC",
 ) -> dict:
     return {
         "action": "TRADE_ACTION_DEAL",
@@ -89,6 +91,8 @@ class LiveMT5Client:
 
     def get_symbol_info(self, symbol: str) -> SymbolInfo:
         info = mt5.symbol_info(symbol)
+        if info is None:
+            raise RuntimeError(f"mt5.symbol_info returned None for {symbol} (mt5.last_error()={mt5.last_error()})")
         return SymbolInfo(
             name=info.name,
             volume_step=info.volume_step,
@@ -167,6 +171,8 @@ class LiveMT5Client:
     def get_current_price(self, symbol: str) -> tuple[float, float]:
         mt5.symbol_select(symbol, True)
         tick = mt5.symbol_info_tick(symbol)
+        if tick is None:
+            raise RuntimeError(f"mt5.symbol_info_tick returned None for {symbol} (mt5.last_error()={mt5.last_error()})")
         return tick.bid, tick.ask
 
     def get_server_time(self) -> datetime:
@@ -183,6 +189,8 @@ class LiveMT5Client:
         first one it supports, falling back to ORDER_FILLING_RETURN (the most
         widely supported mode) if neither FOK nor IOC is advertised."""
         info = mt5.symbol_info(symbol)
+        if info is None:
+            raise RuntimeError(f"mt5.symbol_info returned None for {symbol} (mt5.last_error()={mt5.last_error()})")
         filling_mode = info.filling_mode
         if filling_mode & _SYMBOL_FILLING_FOK:
             return "ORDER_FILLING_FOK"
@@ -200,6 +208,8 @@ class LiveMT5Client:
         request["type_filling"] = getattr(mt5, request["type_filling"])
         request["type_time"] = getattr(mt5, request["type_time"])
         result = mt5.order_send(request)
+        if result is None:
+            return OrderResult(False, None, f"order_send returned None: {mt5.last_error()}")
         success = result.retcode == mt5.TRADE_RETCODE_DONE
         return OrderResult(success=success, ticket=result.order if success else None, comment=result.comment)
 
@@ -215,45 +225,40 @@ class LiveMT5Client:
             for p in positions
         ]
 
-    def close_position(self, ticket: int) -> bool:
-        positions = mt5.positions_get(ticket=ticket)
-        if not positions:
-            return False
-        position = positions[0]
+    def _close_request(self, position, volume: float) -> dict:
+        """Build the opposite-side market DEAL request that closes `volume` of
+        `position`. type_filling is resolved per symbol (default FOK is rejected
+        by brokers that only allow IOC/RETURN)."""
         direction = Direction.SELL if position.type == 0 else Direction.BUY
         bid, ask = self.get_current_price(position.symbol)
         price = bid if direction == Direction.SELL else ask
-        request = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": position.symbol,
-            "volume": position.volume,
-            "type": mt5.ORDER_TYPE_SELL if direction == Direction.SELL else mt5.ORDER_TYPE_BUY,
-            "position": ticket,
-            "price": price,
-            "deviation": 20,
-        }
-        result = mt5.order_send(request)
-        return result.retcode == mt5.TRADE_RETCODE_DONE
-
-    def close_partial_position(self, ticket: int, volume: float) -> bool:
-        positions = mt5.positions_get(ticket=ticket)
-        if not positions:
-            return False
-        position = positions[0]
-        direction = Direction.SELL if position.type == 0 else Direction.BUY
-        bid, ask = self.get_current_price(position.symbol)
-        price = bid if direction == Direction.SELL else ask
-        request = {
+        return {
             "action": mt5.TRADE_ACTION_DEAL,
             "symbol": position.symbol,
             "volume": volume,
             "type": mt5.ORDER_TYPE_SELL if direction == Direction.SELL else mt5.ORDER_TYPE_BUY,
-            "position": ticket,
+            "position": position.ticket,
             "price": price,
-            "deviation": 20,
+            "deviation": DEFAULT_DEVIATION,
+            "type_filling": getattr(mt5, self._resolve_filling_mode(position.symbol)),
         }
+
+    def _close(self, ticket: int, volume: float | None) -> bool:
+        positions = mt5.positions_get(ticket=ticket)
+        if not positions:
+            return False
+        position = positions[0]
+        request = self._close_request(position, position.volume if volume is None else volume)
         result = mt5.order_send(request)
+        if result is None:
+            return False
         return result.retcode == mt5.TRADE_RETCODE_DONE
+
+    def close_position(self, ticket: int) -> bool:
+        return self._close(ticket, None)
+
+    def close_partial_position(self, ticket: int, volume: float) -> bool:
+        return self._close(ticket, volume)
 
     def modify_stop_loss(self, ticket: int, new_sl: float) -> bool:
         positions = mt5.positions_get(ticket=ticket)
@@ -268,4 +273,6 @@ class LiveMT5Client:
             "tp": position.tp,
         }
         result = mt5.order_send(request)
+        if result is None:
+            return False
         return result.retcode == mt5.TRADE_RETCODE_DONE
