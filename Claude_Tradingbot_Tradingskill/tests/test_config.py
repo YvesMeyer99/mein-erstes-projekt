@@ -140,3 +140,122 @@ def test_load_settings_missing_keys_raises(monkeypatch):
     monkeypatch.setenv("MT5_SERVER", "x")
     with pytest.raises(ValueError):
         load_settings()
+
+
+def _cfg_with(tmp_path, mutate):
+    data = json.loads(EXAMPLE_JSON)
+    mutate(data)
+    return _write(tmp_path, json.dumps(data))
+
+
+def test_example_config_loads():
+    cfg = load_config("config.example.json")
+    xau = next(s for s in cfg.symbols if s.name == "XAUUSD")
+    assert xau.strategy.or_minutes == 30
+    assert xau.strategy.target_r == 2.0
+
+
+@pytest.mark.parametrize("bad", ["false", "no", "0", 0, 1, None])
+def test_enabled_must_be_real_bool(tmp_path, bad):
+    path = _cfg_with(tmp_path, lambda d: d["symbols"][0].__setitem__("enabled", bad))
+    with pytest.raises(ValueError):
+        load_config(path)
+
+
+def test_allow_short_string_rejected(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["strategy"].__setitem__("allow_short", "false"))
+    with pytest.raises(ValueError):
+        load_config(path)
+
+
+def test_or_minutes_string_rejected(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["strategy"].__setitem__("or_minutes", "15"))
+    with pytest.raises(ValueError):
+        load_config(path)
+
+
+def test_numeric_field_rejects_bool_and_float_for_int(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["risk"].__setitem__("max_trades_per_day", True))
+    with pytest.raises(ValueError):
+        load_config(path)
+    path = _cfg_with(tmp_path, lambda d: d["strategy"].__setitem__("or_minutes", 15.5))
+    with pytest.raises(ValueError):
+        load_config(path)
+
+
+def test_wrong_type_in_override_rejected(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["symbols"][0].__setitem__("overrides", {"or_minutes": "30"}))
+    with pytest.raises(ValueError):
+        load_config(path)
+    path = _cfg_with(
+        tmp_path, lambda d: d["symbols"][0].__setitem__("overrides", {"strategy": {"allow_short": "no"}})
+    )
+    with pytest.raises(ValueError):
+        load_config(path)
+
+
+def test_timemachine_enabled_must_be_bool(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["timemachine_filter"].__setitem__("enabled", "false"))
+    with pytest.raises(ValueError):
+        load_config(path)
+
+
+def test_unknown_key_in_block_rejected(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["strategy"].__setitem__("or_minuts", 15))
+    with pytest.raises(ValueError, match="or_minuts"):
+        load_config(path)
+
+
+def test_unknown_override_key_rejected(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["symbols"][0].__setitem__("overrides", {"or_minuts": 30}))
+    with pytest.raises(ValueError, match="or_minuts"):
+        load_config(path)
+
+
+def test_unknown_key_in_grouped_override_rejected(tmp_path):
+    path = _cfg_with(
+        tmp_path, lambda d: d["symbols"][0].__setitem__("overrides", {"strategy": {"or_minuts": 30}})
+    )
+    with pytest.raises(ValueError, match="or_minuts"):
+        load_config(path)
+
+
+def test_grouped_by_block_overrides(tmp_path):
+    path = _cfg_with(
+        tmp_path,
+        lambda d: d["symbols"][0].__setitem__(
+            "overrides",
+            {"strategy": {"or_minutes": 45}, "risk": {"risk_per_trade_pct": 0.25}, "session": {"flat_by": "17:00"}},
+        ),
+    )
+    cfg = load_config(path)
+    eur, gbp = cfg.symbols[0], cfg.symbols[1]
+    assert eur.strategy.or_minutes == 45
+    assert eur.strategy.target_r == 2.0  # inherited
+    assert eur.risk.risk_per_trade_pct == 0.25
+    assert eur.session.flat_by == "17:00"
+    assert gbp.strategy.or_minutes == 15  # other symbol unaffected
+
+
+def test_grouped_override_block_must_be_object(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d["symbols"][0].__setitem__("overrides", {"strategy": 5}))
+    with pytest.raises(ValueError):
+        load_config(path)
+
+
+def test_missing_symbols_gives_empty_list(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d.pop("symbols"))
+    assert load_config(path).symbols == []
+
+
+def test_symbols_must_be_a_list(tmp_path):
+    path = _cfg_with(tmp_path, lambda d: d.__setitem__("symbols", {"name": "EURUSD"}))
+    with pytest.raises(ValueError):
+        load_config(path)
+
+
+@pytest.mark.parametrize("bad", [[], "x", 5, ["a"]])
+def test_non_dict_overrides_rejected(tmp_path, bad):
+    path = _cfg_with(tmp_path, lambda d: d["symbols"][0].__setitem__("overrides", bad))
+    with pytest.raises(ValueError):
+        load_config(path)
