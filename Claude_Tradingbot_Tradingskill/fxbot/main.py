@@ -28,7 +28,7 @@ def build_engine(settings: Settings, cfg: TradingConfig) -> LiveEngine:
     """Create the MT5 client, connect it, open the DB, and return the engine."""
     client = LiveMT5Client(settings.mt5_login, settings.mt5_password, settings.mt5_server, path=settings.mt5_path)
     if not client.connect():
-        raise RuntimeError("could not connect/login to the MT5 terminal (is it running? check .env)")
+        raise RuntimeError("could not connect/login to the MT5 terminal (check .env incl. MT5_PATH; do not keep the same terminal open manually)")
     conn = init_db(settings.db_path)
     return LiveEngine(client, conn, cfg)
 
