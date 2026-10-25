@@ -167,7 +167,7 @@ def build_order_request(
 
 class LiveMT5Client:
     """Thin wrapper around the MetaTrader5 package. Requires the MT5 terminal
-    to be installed and running. Not unit-tested (no live terminal in CI) —
+    to be installed (connect() starts it via the configured path). Not unit-tested (no live terminal in CI) —
     verify manually against a demo account. All emitted datetimes are true UTC
     (see the module docstring); `connect()` must succeed before any data call.
 
