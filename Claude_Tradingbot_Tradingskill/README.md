@@ -30,8 +30,16 @@ pip install tzdata        # time-zone database (needed on Windows for Europe/Lon
    MT5_LOGIN=12345678
    MT5_PASSWORD=...
    MT5_SERVER=YourBroker-Demo
+   MT5_PATH=C:\Program Files\Trade Quo MT5 Terminal\terminal64.exe
+   # optional: MT5_SERVER_UTC_OFFSET_HOURS=2
    # optional: DB_PATH=data/fxbot.db
    ```
+
+   `MT5_PATH` must point to the broker's `terminal64.exe`. The bot starts that terminal itself
+   (one `initialize` call with path + credentials), so do NOT keep the same terminal open
+   manually: the instance conflict makes the login fail with `-6 Authorization failed`. If the
+   market is closed and the broker-server UTC offset cannot be auto-derived, set
+   `MT5_SERVER_UTC_OFFSET_HOURS` (e.g. `2` or `3`).
 
 2. Strategy / risk: copy `config.example.json` to `config.json` and edit it. Enable the
    symbols you want (`"enabled": true`) and adjust the risk, session, strategy and

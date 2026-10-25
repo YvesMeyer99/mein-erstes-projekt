@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             bars = bars_from_csv(args.file)
         else:
             settings = load_settings()
-            client = LiveMT5Client(settings.mt5_login, settings.mt5_password, settings.mt5_server)
+            client = LiveMT5Client(settings.mt5_login, settings.mt5_password, settings.mt5_server, path=settings.mt5_path)
             if not client.connect():
                 return fail("could not connect/login to the MT5 terminal")
             bars = bars_from_mt5(client, sym.name, cfg.timeframe, _parse_day(args.start), _parse_day(args.end))

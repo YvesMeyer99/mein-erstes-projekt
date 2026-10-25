@@ -26,7 +26,7 @@ DEFAULT_SETTLE_SECONDS = 5  # let the broker publish the just-closed bar before 
 
 def build_engine(settings: Settings, cfg: TradingConfig) -> LiveEngine:
     """Create the MT5 client, connect it, open the DB, and return the engine."""
-    client = LiveMT5Client(settings.mt5_login, settings.mt5_password, settings.mt5_server)
+    client = LiveMT5Client(settings.mt5_login, settings.mt5_password, settings.mt5_server, path=settings.mt5_path)
     if not client.connect():
         raise RuntimeError("could not connect/login to the MT5 terminal (is it running? check .env)")
     conn = init_db(settings.db_path)

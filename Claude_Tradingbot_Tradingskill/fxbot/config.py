@@ -19,6 +19,7 @@ class Settings:
     mt5_password: str
     mt5_server: str
     db_path: str
+    mt5_path: str | None = None
 
 
 def load_settings() -> Settings:
@@ -31,6 +32,7 @@ def load_settings() -> Settings:
         mt5_password=os.environ["MT5_PASSWORD"],
         mt5_server=os.environ["MT5_SERVER"],
         db_path=os.environ.get("DB_PATH", "data/fxbot.db"),
+        mt5_path=os.environ.get("MT5_PATH") or None,
     )
 
 

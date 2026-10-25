@@ -169,14 +169,19 @@ class LiveMT5Client:
     """Thin wrapper around the MetaTrader5 package. Requires the MT5 terminal
     to be installed and running. Not unit-tested (no live terminal in CI) —
     verify manually against a demo account. All emitted datetimes are true UTC
-    (see the module docstring); `connect()` must succeed before any data call."""
+    (see the module docstring); `connect()` must succeed before any data call.
 
-    def __init__(self, login: int, password: str, server: str):
+    `connect()` initializes with the configured terminal `path` + credentials in one
+    call, so the bot starts that terminal itself: do NOT also keep the same install
+    open manually (instance conflict -> -6 Authorization failed)."""
+
+    def __init__(self, login: int, password: str, server: str, path: str | None = None):
         if mt5 is None:
             raise RuntimeError("MetaTrader5 package not available on this platform")
         self.login = login
         self.password = password
         self.server = server
+        self.path = path
         self._server_utc_offset_seconds: int | None = None
 
     @property
@@ -186,9 +191,9 @@ class LiveMT5Client:
         return self._server_utc_offset_seconds
 
     def connect(self) -> bool:
-        if not mt5.initialize():
-            return False
-        if not mt5.login(self.login, password=self.password, server=self.server):
+        kwargs = {"login": self.login, "password": self.password, "server": self.server, "timeout": 60000}
+        ok = mt5.initialize(self.path, **kwargs) if self.path else mt5.initialize(**kwargs)
+        if not ok:
             return False
         try:
             self._server_utc_offset_seconds = self._detect_server_utc_offset()

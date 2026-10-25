@@ -19,8 +19,9 @@ class StubClient:
     instances: list = []
     connect_ok = True
 
-    def __init__(self, login, password, server):
+    def __init__(self, login, password, server, path=None):
         self.args = (login, password, server)
+        self.path = path
         self.connected = False
         StubClient.instances.append(self)
 
@@ -39,6 +40,7 @@ def _settings(tmp_path) -> Settings:
     return Settings(
         mt5_login=123, mt5_password="pw", mt5_server="Demo-Server",
         db_path=str(tmp_path / "sub" / "fxbot.db"),
+        mt5_path=r"C:\MT5\terminal64.exe",
     )
 
 
@@ -55,6 +57,7 @@ def test_build_engine_wires_db_and_client(monkeypatch, tmp_path):
     client = engine.client
     assert isinstance(client, StubClient)
     assert client.args == (123, "pw", "Demo-Server")
+    assert client.path == r"C:\MT5\terminal64.exe"
     assert client.connected is True
     tables = {r[0] for r in engine.conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
     assert "trades" in tables

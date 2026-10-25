@@ -134,6 +134,26 @@ def test_load_settings_reads_mt5_keys(monkeypatch):
     assert s.db_path == "data/fxbot.db"
 
 
+def test_load_settings_reads_mt5_path(monkeypatch):
+    monkeypatch.setenv("MT5_LOGIN", "12345")
+    monkeypatch.setenv("MT5_PASSWORD", "pw")
+    monkeypatch.setenv("MT5_SERVER", "Demo-Server")
+    monkeypatch.setenv("MT5_PATH", r"C:\Broker\terminal64.exe")
+    assert load_settings().mt5_path == r"C:\Broker\terminal64.exe"
+
+
+@pytest.mark.parametrize("value", [None, ""])
+def test_load_settings_mt5_path_optional(monkeypatch, value):
+    monkeypatch.setenv("MT5_LOGIN", "12345")
+    monkeypatch.setenv("MT5_PASSWORD", "pw")
+    monkeypatch.setenv("MT5_SERVER", "Demo-Server")
+    if value is None:
+        monkeypatch.delenv("MT5_PATH", raising=False)
+    else:
+        monkeypatch.setenv("MT5_PATH", value)
+    assert load_settings().mt5_path is None
+
+
 def test_load_settings_missing_keys_raises(monkeypatch):
     monkeypatch.delenv("MT5_LOGIN", raising=False)
     monkeypatch.setenv("MT5_PASSWORD", "pw")
