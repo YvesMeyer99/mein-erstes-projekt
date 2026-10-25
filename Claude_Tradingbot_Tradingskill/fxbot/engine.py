@@ -33,7 +33,11 @@ Design notes / decisions:
     entry logic): realized P&L from the broker's deal history is fed into the daily
     and weekly guards, so a loss limit tripped by a stop-out blocks new entries in
     that same pass. The guards are conn-backed, so the RiskEngine sees the lock
-    through the shared DB. The reconciliation guards use the STRICTEST loss caps of
+    through the shared DB. A trades row that is still open after reconciliation although
+    its session is over (or it is older than STALE_HOURS) AND whose ticket is not held at
+    the broker means a close was never matched: the loss totals may be understated, so
+    it is logged loudly on every pass and new entries are blocked (flat-by closes still
+    run) until the row reconciles. The reconciliation guards use the STRICTEST loss caps of
     the enabled symbols (the lock is portfolio-wide). If reconciliation itself fails,
     new entries are blocked for that pass (fail closed); flat-by closes still run.
 """
@@ -61,6 +65,7 @@ BAR_DELTA = timedelta(minutes=SLOT_MINUTES)
 BARS_PER_DAY = 24 * 60 // SLOT_MINUTES  # 288 (worst case: a 24h market)
 TODAY_BARS = BARS_PER_DAY * 2           # today's session (plus margin)
 TM_LOOKBACK_DAYS = 91                   # ~65 weekdays of history for the pool
+STALE_HOURS = 24                        # an open row older than this is stale even without a session end
 MAX_TRIGGER_AGE_BARS = 1                # trigger may be on the last or the previous closed bar
 
 
@@ -95,6 +100,7 @@ class LiveEngine:
         self.weekly_guard = WeeklyRiskGuard(conn, weekly_cap)
         self.last_reconciled: list[dict] = []
         self._reconcile_ok = True
+        self.stale_unmatched: list[dict] = []
 
     @staticmethod
     def _strictest_loss_caps(cfg: TradingConfig) -> tuple[float, float]:
@@ -129,6 +135,20 @@ class LiveEngine:
         except Exception:  # fail closed for entries: the loss guards may be stale
             log.exception("closed-trade reconciliation failed; blocking new entries this pass")
             self._reconcile_ok = False
+        self.stale_unmatched = []
+        if self._reconcile_ok:
+            try:
+                self.stale_unmatched = self._find_stale_unmatched(now_utc)
+            except Exception:  # cannot verify the books: fail closed for entries
+                log.exception("stale-trade check failed; blocking new entries this pass")
+                self._reconcile_ok = False
+        for stale in self.stale_unmatched:
+            log.error(
+                "UNRECONCILED TRADE: %s ticket %s (trade id %s, entered %s) is still open in the DB "
+                "but has no closing deal and no open broker position; the daily/weekly loss totals "
+                "may be understated - new entries are blocked until it reconciles",
+                stale["symbol"], stale["ticket"], stale["trade_id"], stale["entry_time"],
+            )
         outcomes: list[TradeOutcome] = []
         for sym in self.cfg.symbols:
             if not sym.enabled:
@@ -163,6 +183,19 @@ class LiveEngine:
         if (resolved, today) in self._attempted:
             return TradeOutcome(
                 sym.name, "blocked", [f"an order was already attempted for {resolved} on {today}"]
+            )
+
+        # fail closed on the loss books: a failed or incomplete reconciliation may hide losses
+        if not self._reconcile_ok:
+            return TradeOutcome(
+                sym.name, "blocked",
+                ["closed-trade reconciliation failed; loss guards may be stale - no new entries"],
+            )
+        if self.stale_unmatched:
+            tickets = ", ".join(str(r["ticket"]) for r in self.stale_unmatched)
+            return TradeOutcome(
+                sym.name, "blocked",
+                [f"unreconciled stale open trade(s) (ticket {tickets}): loss totals may be understated"],
             )
 
         # 2. closed bars only
@@ -220,11 +253,6 @@ class LiveEngine:
                     )
 
         # 6. hard risk gate
-        if not self._reconcile_ok:
-            return TradeOutcome(
-                sym.name, "blocked",
-                ["closed-trade reconciliation failed; loss guards may be stale - no new entries"],
-            )
         server_date = now_utc.date().isoformat()
         week_start = (now_utc.date() - timedelta(days=now_utc.weekday())).isoformat()
         open_positions = self._all_open_positions(resolved)
@@ -289,6 +317,52 @@ class LiveEngine:
         return TradeOutcome(sym.name, "placed", notes, order)
 
     # ----------------------------------------------------------------- helpers
+
+    def _find_stale_unmatched(self, now_utc: datetime) -> list[dict]:
+        """Open `trades` rows (still closed = 0 after reconciliation) that should long be
+        over - past flat-by of their entry session day, or older than STALE_HOURS - and
+        whose position is not held at the broker. Such a row means a close that was never
+        matched (e.g. position id != ticket, or a missed deal)."""
+        rows = self.conn.execute("SELECT * FROM trades WHERE closed = 0 ORDER BY id").fetchall()
+        if not rows:
+            return []
+        now_utc = now_utc.astimezone(UTC)
+        held_tickets: set[int] = set()
+        held_symbols: set[str] = set()
+        sym_by_resolved: dict[str, SymbolConfig] = {}
+        for sym in self.cfg.symbols:
+            if not sym.enabled:
+                continue
+            try:
+                name = self.client.resolve_symbol(sym.name)
+            except ValueError:
+                continue
+            sym_by_resolved[name.upper()] = sym
+            for p in self.client.get_open_positions(name):
+                held_tickets.add(p.ticket)
+                held_symbols.add(p.symbol.upper())
+
+        stale: list[dict] = []
+        for row in rows:
+            entry = self._aware(datetime.fromisoformat(row["entry_time"])).astimezone(UTC)
+            over = now_utc - entry >= timedelta(hours=STALE_HOURS)
+            sym = sym_by_resolved.get(row["symbol"].upper())
+            if sym is not None:
+                _, flat_utc = _session_window_utc(sym, session_day(entry, sym.session.timezone))
+                over = over or now_utc >= flat_utc
+            if not over:
+                continue
+            if row["ticket"] is not None:
+                held = int(row["ticket"]) in held_tickets
+            else:  # no ticket to compare: any position on the symbol might be it
+                held = row["symbol"].upper() in held_symbols
+            if held:
+                continue
+            stale.append({
+                "trade_id": row["id"], "symbol": row["symbol"], "ticket": row["ticket"],
+                "entry_time": row["entry_time"],
+            })
+        return stale
 
     def _all_open_positions(self, resolved: str) -> list[Position]:
         """Open positions across all enabled symbols (portfolio-wide max_open_positions)."""

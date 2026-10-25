@@ -550,3 +550,79 @@ def test_reconcile_failure_blocks_new_entries_but_not_the_loop():
     del client.get_closed_deals
     outs = engine.run_all_once(NOW_AFTER_BREAK + timedelta(minutes=1))
     assert outs[0].action == "placed", outs[0].reasons
+
+
+# ------------------------------------------------------------------ stale unmatched open rows
+
+import logging
+
+from fxbot.mt5_types import Position
+
+_OLD_TRADE = (
+    "INSERT INTO trades (symbol, entry_time, direction, entry_price, sl, tp, lot, crv, entry_balance, ticket) "
+    "VALUES ('EURUSD', '2026-01-09T08:20:00+00:00', 'buy', 1.1, 1.09, 1.12, 0.5, 2.0, 10000.0, 77)"
+)
+
+
+def _seed_old_open(conn) -> None:
+    conn.execute(_OLD_TRADE)
+    conn.commit()
+
+
+def test_stale_unmatched_row_alarms_and_blocks_entries(caplog):
+    engine, client, conn, sym = _make(BREAKOUT)
+    _seed_old_open(conn)  # closed=0 since Friday, no deal, no broker position with ticket 77
+    with caplog.at_level(logging.ERROR, logger="fxbot.engine"):
+        outs = engine.run_all_once(NOW_AFTER_BREAK)
+    assert outs[0].action == "blocked"
+    assert any("unreconciled" in r for r in outs[0].reasons)
+    assert client.sent_orders == []
+    assert any("UNRECONCILED TRADE" in r.message and "77" in r.message for r in caplog.records)
+    # the alarm repeats on every pass
+    caplog.clear()
+    with caplog.at_level(logging.ERROR, logger="fxbot.engine"):
+        engine.run_all_once(NOW_AFTER_BREAK + timedelta(minutes=1))
+    assert any("UNRECONCILED TRADE" in r.message for r in caplog.records)
+
+
+def test_stale_unmatched_row_does_not_stop_the_flat_by_close():
+    engine, client, conn, sym = _make(BREAKOUT)
+    _seed_old_open(conn)
+    client.send_order("EURUSD", Direction.BUY, 0.1, 1.09, 1.12)  # held position, ticket 1
+    outs = engine.run_all_once(NOW_AT_FLAT_BY)
+    assert outs[0].action == "flat_close"
+    assert client.get_open_positions("EURUSD") == []
+    assert len(client.sent_orders) == 1  # nothing new was sent
+
+
+def test_fresh_open_trade_with_held_position_is_not_stale():
+    engine, client, conn, sym = _make(BREAKOUT)
+    assert engine.run_all_once(NOW_AFTER_BREAK)[0].action == "placed"
+    outs = engine.run_all_once(NOW_AFTER_BREAK + timedelta(minutes=5))
+    assert engine.stale_unmatched == []
+    assert not any("unreconciled" in r for o in outs for r in o.reasons)
+
+
+def test_old_row_whose_ticket_is_still_held_is_not_stale():
+    engine, client, conn, sym = _make(BREAKOUT)
+    _seed_old_open(conn)
+    client._positions[77] = Position(
+        ticket=77, symbol="EURUSD", direction=Direction.BUY, volume=0.5, price_open=1.1,
+        sl=1.09, tp=1.12, open_time=datetime(2026, 1, 9, 8, 20, tzinfo=UTC),
+    )
+    outs = engine.run_all_once(NOW_AFTER_BREAK)
+    assert engine.stale_unmatched == []
+    assert outs[0].action == "flat_close"  # held across days -> closed by the flat-by rule, not blocked as stale
+
+
+def test_entries_resume_once_the_stale_row_reconciles():
+    engine, client, conn, sym = _make(BREAKOUT)
+    _seed_old_open(conn)
+    assert engine.run_all_once(NOW_AFTER_BREAK)[0].action == "blocked"
+    client.closed_deals.append(ClosedDeal(
+        position_id=77, symbol="EURUSD", profit=-50.0, volume=0.5, close_price=1.09,
+        close_time=datetime(2026, 1, 9, 12, 0, tzinfo=UTC),
+    ))
+    outs = engine.run_all_once(NOW_AFTER_BREAK + timedelta(minutes=1))
+    assert engine.stale_unmatched == []
+    assert outs[0].action == "placed", outs[0].reasons
