@@ -80,7 +80,8 @@ def plan_exit(
     """Build a Signal from a trigger: stop by `stop_rule`, target at `target_r` x risk.
 
     Rules: or_mid / or_low / or_high (opening-range levels), pct (`stop_param`
-    percent of entry), atr (`stop_param` x ATR14 of `session_bars`). The stop is
+    percent of entry), atr (`stop_param` x ATR14 of the `session_bars` at/before
+    `trigger.trigger_time`). The stop is
     rounded away from entry. Raises ValueError for missing data, an unknown
     rule, or non-positive risk.
     """
@@ -103,7 +104,11 @@ def plan_exit(
             raise ValueError("stop rule 'atr' requires stop_param")
         if not session_bars:
             raise ValueError("stop rule 'atr' requires session_bars")
-        stop = entry + sign * stop_param * atr14(session_bars)
+        # only bars at/before the trigger: later bars would be look-ahead bias
+        known = [b for b in session_bars if b.time <= trigger.trigger_time]
+        if not known:
+            raise ValueError("stop rule 'atr' has no session_bars at/before trigger_time")
+        stop = entry + sign * stop_param * atr14(known)
     else:
         raise ValueError(f"unknown stop rule: {stop_rule!r}")
 

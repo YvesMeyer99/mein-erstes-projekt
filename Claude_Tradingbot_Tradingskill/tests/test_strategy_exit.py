@@ -70,10 +70,39 @@ def test_pct_stop_rounds_away_from_entry():
 
 def test_atr_stop_uses_param_times_atr():
     bars = _bars(20, rng=0.002)
+    trig = _trigger(Direction.BUY, 1.111)
+    trig = OrbTrigger(**{**trig.__dict__, "trigger_time": bars[-1].time})
     assert atr14(bars) == pytest.approx(0.002)
-    s = plan_exit(BUY_TRIGGER, "atr", 2.0, session_bars=bars, stop_param=1.5)
+    s = plan_exit(trig, "atr", 2.0, session_bars=bars, stop_param=1.5)
     assert s.sl == pytest.approx(1.111 - 0.003, abs=1e-9)
     assert s.tp == pytest.approx(1.111 + 0.006, abs=1e-9)
+
+
+def test_atr_stop_ignores_bars_after_trigger():
+    before = _bars(20, rng=0.002)
+    after = [
+        Bar(T0 + timedelta(minutes=5 * (20 + i)), 1.10, 1.20, 1.00, 1.10, 1.0)
+        for i in range(10)
+    ]
+    trig = OrbTrigger(
+        direction=Direction.BUY,
+        entry=1.111,
+        trigger_time=before[-1].time,
+        slot=19,
+        or_high=1.11,
+        or_low=1.10,
+    )
+    s = plan_exit(trig, "atr", 2.0, session_bars=before + after, stop_param=1.5)
+    assert s.sl == pytest.approx(1.111 - 1.5 * 0.002, abs=1e-9)
+
+
+def test_atr_stop_no_bars_up_to_trigger_raises():
+    late_bars = [
+        Bar(T0 + timedelta(minutes=5 * (i + 1)), 1.1, 1.101, 1.099, 1.1, 1.0)
+        for i in range(20)
+    ]
+    with pytest.raises(ValueError):
+        plan_exit(BUY_TRIGGER, "atr", 2.0, session_bars=late_bars, stop_param=1.5)
 
 
 def test_atr_stop_requires_session_bars():
