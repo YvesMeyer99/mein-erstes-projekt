@@ -228,15 +228,43 @@ def test_run_time_machine_full_flow():
 
 def test_run_excludes_short_sessions_and_the_day_itself():
     past = _past_weekdays(DAY, 25)
-    bars = _london_bars(past, FULL_SLOTS)
+    truncated_day = past[10]  # a day inside the window with only 70 of 144 slots
     rng = random.Random(3)
-    half = _synthetic_session(date(2026, 4, 2), 70, rng)  # short day inside the window
-    day_bars = _london_bars([DAY], FULL_SLOTS)
-    half_day_bars = [b for b in half if b.time not in {x.time for x in bars}]
-    allbars = sorted(bars + half_day_bars + day_bars, key=lambda b: b.time)
-    trig, sig = _trigger_and_signal(allbars)
-    r = run_time_machine(allbars, DAY, trig, sig, CFG, replays=200)
-    assert r["pool_sessions"] == 25
+    bars = _london_bars([d for d in past if d != truncated_day], FULL_SLOTS)
+    bars += _synthetic_session(truncated_day, 70, rng)
+    # a short Saturday session (no full session exists for that date)
+    bars += _synthetic_session(date(2026, 4, 4), 30, rng)
+    bars += _london_bars([DAY], FULL_SLOTS)
+    bars.sort(key=lambda b: b.time)
+    trig, sig = _trigger_and_signal(bars)
+    r = run_time_machine(bars, DAY, trig, sig, CFG, replays=200)
+    # 25 weekdays - 1 truncated = 24 full; the short Saturday and the day itself are excluded
+    assert r["pool_sessions"] == 24
+    assert r["history"]["sessions"] == 24
+    assert r["pool_to"] < DAY
+    assert r["pool_from"] == past[0]
+
+
+@pytest.mark.parametrize("rule,param", [("pct", 0.15), ("atr", 3.0)])
+def test_history_stop_distance_matches_signal_distance_for_pct_and_atr(rule, param):
+    # pins the unit of the pct conversion: stop_param is a PERCENT of entry, not a fraction
+    bars = _london_bars(_past_weekdays(DAY, 25) + [DAY], FULL_SLOTS)
+    cfg = SymbolConfig(name="EURUSD", enabled=True, risk=RiskConfig(), session=SessionConfig(),
+                       strategy=StrategyConfig(or_minutes=15, stop_rule=rule, target_r=2.0))
+    day_bars = group_by_session_day(bars, cfg.session.timezone, cfg.session.open)[DAY]
+    b = day_bars[20]  # ATR14 needs >= 15 bars up to the trigger
+    trig = OrbTrigger(direction=Direction.BUY, entry=b.close, trigger_time=b.time, slot=20,
+                      or_high=b.close - 0.0002, or_low=b.close - 0.0020)
+    day_list = [day_bars[i] for i in range(21)]
+    sig = plan_exit(trig, rule, 2.0, session_bars=day_list, stop_param=param)
+    r = run_time_machine(bars, DAY, trig, sig, cfg, replays=200)
+    frac = abs(sig.entry - sig.sl) / sig.entry
+    assert 0 < frac < 0.01  # sanity: a sub-1% stop, so a 100x unit error would be obvious
+    trades = r["history"]["trades"]
+    assert r["history"]["triggered"] > 0 and trades
+    for t in trades:
+        assert abs(t["entry"] - t["stop"]) / t["entry"] == pytest.approx(frac, abs=1e-4)
+        assert t["stop"] < t["entry"]
 
 
 def test_run_refuses_with_too_few_sessions():
