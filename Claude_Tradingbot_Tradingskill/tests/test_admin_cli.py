@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -120,16 +120,119 @@ def test_close_uses_close_date_and_its_monday_for_the_week(env):
     assert _weekly(conn, WEEK) is None
 
 
-def test_close_time_without_tz_is_treated_as_utc_and_default_is_now(env):
+def test_close_time_default_is_now_utc(env):
     conn = env[0]
-    a = _trade(conn, ticket=1)
     b = _trade(conn, entry="2026-01-12T09:00:00+00:00", ticket=2)
-    assert _run(env, "close", "--id", str(a), "--pnl-pct", "-1", "--close-time", "2026-01-12T10:30:00") == 0
-    assert _row(conn, a)["exit_time"] == CLOSE
     before = datetime.now(UTC)
     assert _run(env, "close", "--id", str(b), "--pnl-pct", "-1") == 0
     exit_time = datetime.fromisoformat(_row(conn, b)["exit_time"])
     assert before <= exit_time <= datetime.now(UTC)
+
+
+def test_naive_close_time_requires_the_server_offset(env, capsys):
+    conn = env[0]
+    tid = _trade(conn)
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "-1", "--close-time", "2026-01-12T10:30:00") == 2
+    assert "server-utc-offset-hours" in capsys.readouterr().err
+    assert _row(conn, tid)["closed"] == 0 and _daily(conn, DAY) is None
+
+
+def test_naive_close_time_is_converted_from_server_time(env, capsys):
+    conn = env[0]
+    tid = _trade(conn)
+    # server clock (UTC+3) shows Tue 01:30 -> 22:30 UTC on Monday 2026-01-12: Monday bucket, not Tuesday
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "-1", "--close-time", "2026-01-13T01:30:00",
+                "--server-utc-offset-hours", "3") == 0
+    assert _row(conn, tid)["exit_time"] == "2026-01-12T22:30:00+00:00"
+    assert _daily(conn, "2026-01-12")["realized_pnl_pct"] == pytest.approx(-1.0)
+    assert _daily(conn, "2026-01-13") is None
+    out = capsys.readouterr().out
+    assert "2026-01-12T22:30:00+00:00 UTC" in out and "Monday 2026-01-12" in out
+
+
+def test_server_time_straddling_utc_midnight_into_the_next_week(env):
+    conn = env[0]
+    tid = _trade(conn, entry="2026-01-18T20:00:00+00:00")     # Sunday
+    # server (UTC+2) shows Sun 23:30 = 21:30 UTC Sunday -> still the old week (Monday 2026-01-12)
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "-1", "--close-time", "2026-01-18T23:30:00",
+                "--server-utc-offset-hours", "2") == 0
+    assert _weekly(conn, "2026-01-12")["realized_pnl_pct"] == pytest.approx(-1.0)
+    assert _weekly(conn, "2026-01-19") is None
+
+
+def test_server_offset_can_move_a_close_into_the_next_utc_day(env):
+    conn = env[0]
+    tid = _trade(conn, entry="2026-01-18T20:00:00+00:00")
+    # negative offset (UTC-5): server Sun 20:30 = Mon 01:30 UTC -> new week
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "-1", "--close-time", "2026-01-18T20:30:00",
+                "--server-utc-offset-hours", "-5") == 0
+    assert _weekly(conn, "2026-01-19")["realized_pnl_pct"] == pytest.approx(-1.0)
+
+
+def test_explicit_offset_in_close_time_wins_over_server_offset(env):
+    conn = env[0]
+    tid = _trade(conn)
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "-1",
+                "--close-time", "2026-01-12T12:30:00+02:00") == 0
+    assert _row(conn, tid)["exit_time"] == CLOSE
+
+
+@pytest.mark.parametrize("off", ["99", "nan"])
+def test_implausible_server_offset_is_refused(env, off):
+    tid = _trade(env[0])
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "-1", "--close-time", "2026-01-12T10:30:00",
+                "--server-utc-offset-hours", off) == 2
+    assert _row(env[0], tid)["closed"] == 0
+
+
+def test_future_close_time_is_refused(env, capsys):
+    conn = env[0]
+    tid = _trade(conn)
+    future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "-1", "--close-time", future) == 2
+    assert "future" in capsys.readouterr().err
+    assert _row(conn, tid)["closed"] == 0
+    assert conn.execute("SELECT COUNT(*) c FROM daily_risk").fetchone()["c"] == 0
+
+
+def test_close_time_within_slack_of_now_is_accepted(env):
+    tid = _trade(env[0])
+    near = (datetime.now(UTC) + timedelta(minutes=2)).isoformat()
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "-1", "--close-time", near) == 0
+
+
+def test_profit_overflowing_the_percentage_is_refused(env, capsys):
+    conn = env[0]
+    tid = _trade(conn, balance=1e-320)
+    assert _run(env, "close", "--id", str(tid), "--profit", "1e300", "--close-time", CLOSE) == 2
+    assert "overflow" in capsys.readouterr().err
+    assert _row(conn, tid)["closed"] == 0 and _daily(conn, DAY) is None
+
+
+def test_pnl_pct_overflowing_the_profit_is_refused(env, capsys):
+    conn = env[0]
+    tid = _trade(conn, balance=1e308)
+    assert _run(env, "close", "--id", str(tid), "--pnl-pct", "1e308", "--close-time", CLOSE) == 2
+    assert "overflow" in capsys.readouterr().err
+    assert _row(conn, tid)["closed"] == 0 and _daily(conn, DAY) is None
+
+
+def test_db_path_from_env_needs_no_mt5_credentials(env, monkeypatch, capsys):
+    conn, db, _ = env
+    for k in ("MT5_LOGIN", "MT5_PASSWORD", "MT5_SERVER"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("DB_PATH", db)
+    _trade(conn, ticket=4242)
+    assert admin_cli.main(["list-open"]) == 0
+    assert "4242" in capsys.readouterr().out
+    assert admin_cli.main(["abandon", "--id", "1", "--reason", "env db"]) == 0
+    assert _row(conn, 1)["closed"] == 1
+
+
+def test_missing_env_db_path_is_refused(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "absent.db"))
+    assert admin_cli.main(["list-open"]) == 2
+    assert not (tmp_path / "absent.db").exists()
 
 
 def test_close_refuses_close_time_before_entry(env, capsys):

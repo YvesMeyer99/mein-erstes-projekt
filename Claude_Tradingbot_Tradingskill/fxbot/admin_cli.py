@@ -19,18 +19,21 @@ the live DB - run it while the bot is stopped.
 """
 import argparse
 import math
+import os
 import sqlite3
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fxbot.config import load_config, load_settings
+from fxbot.config import load_config
 from fxbot.db import init_db
 from fxbot.engine import LiveEngine
 from fxbot.reconcile import _parse_utc, guard_keys
 from fxbot.risk import DailyRiskGuard, WeeklyRiskGuard
 
 UTC = timezone.utc
+FUTURE_SLACK = timedelta(minutes=5)   # tolerated clock skew for a close time 'in the future'
+DEFAULT_DB_PATH = "data/fxbot.db"      # same default as config.load_settings
 
 
 class AdminError(Exception):
@@ -63,6 +66,8 @@ def close_trade(
     profit: float | None = None,
     close_time: datetime | None = None,
     close_price: float | None = None,
+    server_utc_offset_hours: float | None = None,
+    now_utc: datetime | None = None,
 ) -> dict:
     """Manually reconcile ONE open row; mirrors `reconcile_closed_trades` for a single row."""
     if (pnl_pct is None) == (profit is None):
@@ -79,15 +84,25 @@ def close_trade(
                 "from --profit; pass --pnl-pct instead"
             )
         pnl_pct = profit / balance * 100.0
+        if not math.isfinite(pnl_pct):
+            raise AdminError(f"--profit {profit} / entry_balance {balance} overflows the percentage")
     else:
         if not math.isfinite(pnl_pct):
             raise AdminError(f"--pnl-pct must be a finite number, got {pnl_pct}")
         if balance is not None and balance > 0:
             profit = pnl_pct / 100.0 * balance
+            if not math.isfinite(profit):
+                raise AdminError(f"--pnl-pct {pnl_pct} x entry_balance {balance} overflows the profit")
     if close_price is not None and not math.isfinite(close_price):
         raise AdminError(f"--close-price must be a finite number, got {close_price}")
 
-    close_utc = (datetime.now(UTC) if close_time is None else _as_utc(close_time))
+    now_utc = datetime.now(UTC) if now_utc is None else now_utc
+    close_utc = now_utc if close_time is None else _close_time_to_utc(close_time, server_utc_offset_hours)
+    if close_utc > now_utc + FUTURE_SLACK:
+        raise AdminError(
+            f"close time {close_utc.isoformat()} is in the future (now {now_utc.isoformat()}); "
+            "check the date/year and the --server-utc-offset-hours sign"
+        )
     if close_utc < _parse_utc(row["entry_time"]):
         raise AdminError(
             f"close time {close_utc.isoformat()} is before the trade's entry {row['entry_time']}"
@@ -138,8 +153,20 @@ def abandon_trade(conn: sqlite3.Connection, trade_id: int, reason: str) -> dict:
     return {"trade_id": trade_id, "symbol": row["symbol"], "reason": reason}
 
 
-def _as_utc(t: datetime) -> datetime:
-    return t.replace(tzinfo=UTC) if t.tzinfo is None else t.astimezone(UTC)
+def _close_time_to_utc(t: datetime, server_utc_offset_hours: float | None) -> datetime:
+    """Aware times are converted as they are. A NAIVE time is broker SERVER time (what the MT5
+    terminal shows) and needs its UTC offset; guessing UTC would book it on the wrong day/week."""
+    if t.tzinfo is not None:
+        return t.astimezone(UTC)
+    if server_utc_offset_hours is None:
+        raise AdminError(
+            "--close-time has no timezone: the MT5 terminal shows broker SERVER time, so pass "
+            "--server-utc-offset-hours (e.g. 2 or 3; 0 if the time is already UTC) or give an "
+            "explicit offset such as 2026-01-12T12:30:00+02:00"
+        )
+    if not (math.isfinite(server_utc_offset_hours) and -14 <= server_utc_offset_hours <= 14):
+        raise AdminError(f"--server-utc-offset-hours {server_utc_offset_hours} is not a plausible UTC offset")
+    return (t - timedelta(hours=server_utc_offset_hours)).replace(tzinfo=UTC)
 
 
 # --------------------------------------------------------------------------- CLI
@@ -147,7 +174,7 @@ def _as_utc(t: datetime) -> datetime:
 
 def _parse_time(text: str) -> datetime:
     try:
-        return _parse_utc(text)
+        return datetime.fromisoformat(text)   # naive stays naive: see _close_time_to_utc
     except ValueError:
         raise argparse.ArgumentTypeError(f"not an ISO-8601 timestamp: {text!r}") from None
 
@@ -155,7 +182,7 @@ def _parse_time(text: str) -> datetime:
 def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description="Operator tool: clear an unreconciled trade row (writes to the live DB; stop the bot first).")
-    p.add_argument("--db", help="SQLite file (default: DB_PATH from the environment / .env, data/fxbot.db)")
+    p.add_argument("--db", help="SQLite file (default: DB_PATH from the environment / .env, else data/fxbot.db)")
     p.add_argument("--config", default="config.json",
                    help="config.json; `close` reads the loss caps from it (default: config.json)")
     sub = p.add_subparsers(dest="command", required=True)
@@ -169,7 +196,13 @@ def _build_parser() -> argparse.ArgumentParser:
     grp.add_argument("--profit", type=float,
                      help="realized net profit in account currency; pnl_pct = profit / entry_balance * 100")
     c.add_argument("--close-time", type=_parse_time,
-                   help="ISO-8601 close time (naive = UTC); decides the guard day/week. Default: now (UTC)")
+                   help="ISO-8601 close time; decides the guard day/week. A time without an offset is "
+                        "broker SERVER time (as shown in MT5) and requires --server-utc-offset-hours. "
+                        "Default: now (UTC)")
+    c.add_argument("--server-utc-offset-hours", type=float,
+                   help="broker server offset from UTC in hours (e.g. 2 or 3), used to convert a naive "
+                        "--close-time to UTC (like MT5_SERVER_UTC_OFFSET_HOURS); ignored for times with "
+                        "an explicit offset")
     c.add_argument("--close-price", type=float, help="optional close price to store on the row")
 
     a = sub.add_parser("abandon", help="mark ONE open row closed WITHOUT booking any P&L (phantom row)")
@@ -181,10 +214,7 @@ def _build_parser() -> argparse.ArgumentParser:
 def _resolve_db_path(arg: str | None) -> str:
     path = arg
     if path is None:
-        try:
-            path = load_settings().db_path
-        except ValueError as exc:
-            raise AdminError(f"{exc} (or pass --db PATH)") from None
+        path = os.environ.get("DB_PATH", DEFAULT_DB_PATH)   # pure DB tool: no MT5 credentials needed
     if path != ":memory:" and not Path(path).is_file():
         raise AdminError(f"database file not found: {path} (refusing to create a new one)")
     return path
@@ -224,11 +254,13 @@ def main(argv: list[str] | None = None) -> int:
                 conn, DailyRiskGuard(conn, daily_cap), WeeklyRiskGuard(conn, weekly_cap), args.id,
                 pnl_pct=args.pnl_pct, profit=args.profit,
                 close_time=args.close_time, close_price=args.close_price,
+                server_utc_offset_hours=args.server_utc_offset_hours,
             )
             print(
-                f"closed trade {r['trade_id']} ({r['symbol']}): {r['result']} {r['pnl_pct']:+.2f}% booked on "
+                f"closed trade {r['trade_id']} ({r['symbol']}): {r['result']} {r['pnl_pct']:+.2f}% at "
+                f"{r['close_time'].isoformat()} UTC booked on day "
                 f"{r['date']} (day total {r['daily_realized_pct']:+.2f}%, "
-                f"{'LOCKED' if r['daily_locked'] else 'open'}) and week of {r['week_start']} "
+                f"{'LOCKED' if r['daily_locked'] else 'open'}) and week starting Monday {r['week_start']} "
                 f"(week total {r['weekly_realized_pct']:+.2f}%, "
                 f"{'LOCKED' if r['weekly_locked'] else 'open'})"
             )

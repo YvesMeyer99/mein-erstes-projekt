@@ -114,18 +114,24 @@ Lists every open row (id, symbol, ticket, entry time, direction, lot, entry bala
 terminal's open positions and its History tab (deals) to see what really happened to the trade.
 
 **Fix - the trade really closed at the broker.** Read the real net result (profit incl. commission/swap)
-and the close time from the terminal and book it, so the daily/weekly totals and the lock stay correct:
+and the close time from the terminal and book it, so the daily/weekly totals and the lock stay correct.
+**Times in the MT5 terminal (History tab) are broker SERVER time (often UTC+2 winter / UTC+3 summer), not
+UTC.** The loss must land on the UTC day and Monday-week the engine checks, so convert: either pass the
+server time plus `--server-utc-offset-hours`, or give an explicit offset. A `--close-time` without an
+offset and without `--server-utc-offset-hours` is refused (no silent UTC guess).
 
 ```
-python -m fxbot.admin_cli close --id 7 --profit -52.30 --close-time 2026-01-12T10:30:00+00:00 --close-price 1.0951
-python -m fxbot.admin_cli close --id 7 --pnl-pct -0.52 --close-time 2026-01-12T10:30:00+00:00
+# History tab shows Tue 2026-01-13 01:30 on a UTC+3 server  ->  22:30 UTC on Monday 2026-01-12
+python -m fxbot.admin_cli close --id 7 --profit -52.30 --close-time 2026-01-13T01:30:00 --server-utc-offset-hours 3 --close-price 1.0951
+# same instant, explicit offset
+python -m fxbot.admin_cli close --id 7 --pnl-pct -0.52 --close-time 2026-01-13T01:30:00+03:00
 ```
 
-`--profit` is converted with the row's `entry_balance` (`profit / entry_balance * 100`); use `--pnl-pct` if
-the row has none. `--close-time` (ISO-8601, naive = UTC; default now) decides which UTC day and which
-Monday-week the loss is booked on - the same convention as automatic reconciliation. `close` reads the loss
-caps from `config.json` (`--config PATH`) exactly like the live engine, so a loss that crosses the daily or
-weekly cap locks it (and the lock stays latched).
+The confirmation line prints the resolved UTC instant and the day / Monday-week it was booked on - check
+that it is what you expect. A close time in the future (beyond 5 min) is refused. `--profit` is converted
+with the row's `entry_balance` (`profit / entry_balance * 100`); use `--pnl-pct` if the row has none.
+`close` reads the loss caps from `config.json` (`--config PATH`) exactly like the live engine, so a loss
+that crosses the daily or weekly cap locks it (and the lock stays latched).
 
 **Fix - the row never reached the broker (phantom/erroneous).**
 
@@ -136,7 +142,7 @@ python -m fxbot.admin_cli abandon --id 7 --reason "order rejected, no position w
 Marks the row closed (`result = abandoned`, reason stored in `note`) WITHOUT touching the guards. Never use
 this for a trade that actually traded - that would hide a real loss from the loss limits.
 
-Use `--db PATH` to target a specific SQLite file (default: `DB_PATH` from `.env`). Restart the bot afterwards.
+Use `--db PATH` to target a specific SQLite file (default: `DB_PATH` from the environment/`.env`, else `data/fxbot.db`; no MT5 credentials needed; a non-existent file is refused). Restart the bot afterwards.
 
 ## Known limitations (as of this build)
 
